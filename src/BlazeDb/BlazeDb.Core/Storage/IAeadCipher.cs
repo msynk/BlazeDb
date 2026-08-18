@@ -3,7 +3,7 @@ namespace BlazeDb.Storage;
 /// <summary>
 /// An authenticated cipher used by <see cref="EncryptedStorage"/>. Kept as an abstraction because
 /// the platforms differ: .NET's managed AES is unavailable in the browser sandbox, where the only
-/// route to AES-GCM is the asynchronous WebCrypto API. Hence the async signatures — they cost
+/// route to AES-GCM is the asynchronous WebCrypto API. Hence the async signatures - they cost
 /// nothing on desktop and are required in the browser.
 /// </summary>
 public interface IAeadCipher

@@ -18,7 +18,7 @@ public enum StorageMode
 ///
 /// Storage is OPFS (Origin Private File System) when the browser allows it and
 /// this tab wins the Web Locks election. Otherwise the demo degrades to
-/// <see cref="InMemoryStorage"/> so every page still works — just without
+/// <see cref="InMemoryStorage"/> so every page still works - just without
 /// durability across reloads.
 /// </summary>
 [SupportedOSPlatform("browser")]

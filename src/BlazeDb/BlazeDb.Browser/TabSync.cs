@@ -28,7 +28,7 @@ internal static partial class TabsInterop
 /// Keeps read-only replica tabs in step with the writer tab. The writer announces each checkpoint
 /// on a BroadcastChannel; replicas respond by reloading from storage.
 /// <para>
-/// Only the signal crosses tabs — never the data. Replicas re-read the snapshot and WAL the writer
+/// Only the signal crosses tabs - never the data. Replicas re-read the snapshot and WAL the writer
 /// has already made durable, so they can never observe a state the writer has not committed. The
 /// consequence is that a replica trails the writer by up to one checkpoint; call
 /// <see cref="Database.ReloadAsync"/> directly if a tab needs to catch up sooner.
@@ -71,7 +71,7 @@ public sealed class TabSync : IAsyncDisposable
 
     /// <summary>
     /// Subscribes <paramref name="replica"/> to the writer tab's checkpoints, reloading it each
-    /// time one lands. <paramref name="onChanged"/> runs after a successful reload — use it to
+    /// time one lands. <paramref name="onChanged"/> runs after a successful reload - use it to
     /// re-run queries and refresh the UI.
     /// </summary>
     public static async ValueTask<TabSync> CreateReplicaAsync(

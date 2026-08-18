@@ -5,7 +5,7 @@ namespace BlazeDb.Querying;
 /// <summary>
 /// A composable query plan over a table: a source (full scan, hash-index lookup or ordered
 /// range), residual predicates, ordering, paging and projection. This is the low-level query
-/// primitive both application code and the EF Core provider target — LINQ operators
+/// primitive both application code and the EF Core provider target - LINQ operators
 /// translate 1:1 onto it, and anything untranslatable can fall back to LINQ-to-objects
 /// cheaply because rows are live objects in memory.
 /// </summary>
@@ -75,7 +75,7 @@ public sealed class Query<TKey, TRow>
     }
 
     /// <summary>
-    /// Sorts results by a key. Unnecessary when an ordered index already provides the order —
+    /// Sorts results by a key. Unnecessary when an ordered index already provides the order -
     /// prefer the ordered-index source in that case.
     /// </summary>
     public Query<TKey, TRow> OrderBy<TSortKey>(Func<TRow, TSortKey> keySelector, bool descending = false)
@@ -145,7 +145,7 @@ public sealed class Query<TKey, TRow>
     /// synchronous scan of a big table blocks rendering and input until it finishes; yielding
     /// lets the browser paint between batches. The trade-off is that the table must not be
     /// written to while the stream is open, exactly as with a <c>foreach</c> over
-    /// <see cref="Execute"/> — batches resume the same underlying enumerator.
+    /// <see cref="Execute"/> - batches resume the same underlying enumerator.
     /// </summary>
     /// <param name="batchSize">Rows to emit between yields. Larger is faster, smaller is smoother.</param>
     public async IAsyncEnumerable<TRow> ExecuteAsync(

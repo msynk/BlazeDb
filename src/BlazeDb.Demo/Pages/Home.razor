@@ -1,7 +1,7 @@
 ﻿@page "/"
 @inject DemoDbService Db
 
-<PageTitle>BlazeDb — a memory-first database for the browser</PageTitle>
+<PageTitle>BlazeDb - a memory-first database for the browser</PageTitle>
 
 <div class="hero rise">
     <div class="hero-inner">
@@ -9,7 +9,7 @@
         <h1>Your data lives in <span class="grad">memory</span>.<br />Durability is a background job.</h1>
         <p>
             BlazeDb is a SQL-free embedded database that keeps every row as a strongly-typed .NET
-            object in managed memory. Reads are plain method calls into hash and ordered indexes —
+            object in managed memory. Reads are plain method calls into hash and ordered indexes -
             no query parsing, no JavaScript interop, no I/O. Writes commit to memory synchronously
             and stream to a write-ahead log that reaches OPFS in the background.
         </p>
@@ -30,7 +30,7 @@
          Lead="Everything below is read from the live database this tab opened when the app started.">
     <div class="stats">
         <StatTile Label="Rows in memory" IconName="database" Tone="accent"
-                  Value="@(Db.IsOpen ? Db.Todos.Count.ToString("N0") : "—")"
+                  Value="@(Db.IsOpen ? Db.Todos.Count.ToString("N0") : "-")"
                   Note="todos table" />
         <StatTile Label="Secondary indexes" IconName="index"
                   Value="@TodoEntry.Table.Indexes.Count.ToString()"
@@ -68,8 +68,8 @@
             <div class="card-icon"><Icon Name="query" /></div>
             <h3>No query language</h3>
             <p>
-                Nothing to parse, plan or bind. You call typed primitives — <code>Get</code>,
-                <code>Lookup</code>, <code>Range</code>, <code>Scan</code> — or compose them
+                Nothing to parse, plan or bind. You call typed primitives - <code>Get</code>,
+                <code>Lookup</code>, <code>Range</code>, <code>Scan</code> - or compose them
                 through <code>Query&lt;TKey, TRow&gt;</code>.
             </p>
         </div>
@@ -131,7 +131,7 @@
                     <div class="dg-note">Points at the newest valid snapshot</div>
                 </div>
             </div>
-            <div class="dg-arrow"><Icon Name="arrow-down" /> IStorage — four async methods</div>
+            <div class="dg-arrow"><Icon Name="arrow-down" /> IStorage - four async methods</div>
             <div class="dg-row">
                 <div class="dg-box io">
                     <div class="dg-title"><Icon Name="disk" /> OpfsStorage</div>
@@ -193,7 +193,7 @@
                         <td class="strong">Ordered range scan (~5,100 rows)</td>
                         <td class="num mono">55.6 µs</td>
                         <td class="num mono">69.3 µs</td>
-                        <td>Comparable — both are index-driven</td>
+                        <td>Comparable - both are index-driven</td>
                     </tr>
                     <tr>
                         <td class="strong">Upsert, autocommit</td>

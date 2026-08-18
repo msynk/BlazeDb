@@ -78,7 +78,7 @@ internal sealed class QueryPlan<TRow> : QueryPlan
     public override void AddOrdering(MethodCallExpression call)
     {
         // Reuse the LINQ-to-Objects operator that matches the Queryable one, with the same generic
-        // arguments, rather than reconstructing the comparison ourselves — that keeps null and
+        // arguments, rather than reconstructing the comparison ourselves - that keeps null and
         // comparer semantics identical to any other LINQ provider.
         var selector = ((LambdaExpression)StripQuotes(call.Arguments[1])).Compile();
         var method = EnumerableOperator(call.Method.Name, call.Method.GetGenericArguments());

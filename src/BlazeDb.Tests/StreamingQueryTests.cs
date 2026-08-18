@@ -82,7 +82,7 @@ public class StreamingQueryTests
         await using var owned = db;
 
         // A batch size of 1 forces a yield per row, so a competing continuation gets to run
-        // before the stream finishes — the property that keeps the UI responsive.
+        // before the stream finishes - the property that keeps the UI responsive.
         var interleaved = false;
         var enumeration = Task.Run(async () =>
         {

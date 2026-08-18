@@ -10,15 +10,15 @@ pay heavy costs on every operation: JS interop marshalling, worker round-trips, 
 BlazeDb eliminates all three:
 
 - **All live data resides in managed memory** as strongly-typed .NET objects. Reads are plain
-  method calls into hash/ordered indexes — no I/O, no interop, no query language.
+  method calls into hash/ordered indexes - no I/O, no interop, no query language.
 - **Durability is a background concern**: commits apply to memory synchronously and are appended
   to a write-ahead log (WAL) that is flushed asynchronously to OPFS (Origin Private File System).
   Periodic snapshots compact the log.
 - **No SQL**: the engine exposes low-level, typed query primitives (`Get`, `Range`, `Scan`,
-  `Query`). The EF Core provider translates LINQ directly into those primitives — there is no
+  `Query`). The EF Core provider translates LINQ directly into those primitives - there is no
   intermediate query language to generate or parse.
 - **AOT/trimming friendly**: serialization and table metadata are produced by a Roslyn source
-  generator — zero runtime reflection.
+  generator - zero runtime reflection.
 - **Built for the browser's constraints**: cooperative yielding so long scans do not freeze the
   UI, storage-quota awareness instead of surprise write failures, encryption through WebCrypto,
   and a single-writer model with read-only replica tabs.
@@ -93,7 +93,7 @@ await foreach (var todo in Query<Guid, TodoItem>.From(todos)
 ### Encryption at rest
 
 `EncryptedStorage` wraps any backend and seals each write into its own AES-GCM frame, so WAL
-appends stay appends. In the browser, use the WebCrypto cipher — the managed `AesGcm` throws
+appends stay appends. In the browser, use the WebCrypto cipher - the managed `AesGcm` throws
 inside the browser sandbox:
 
 ```csharp
@@ -123,7 +123,7 @@ await OpfsStorage.RequestPersistenceAsync();   // ask not to be evicted
 ### Multiple tabs
 
 One tab holds the writer lock; the others open the same database read-only and reload when the
-writer checkpoints. Only the notification crosses tabs — the data always travels through storage,
+writer checkpoints. Only the notification crosses tabs - the data always travels through storage,
 so a replica can never observe an uncommitted state:
 
 ```csharp
@@ -154,8 +154,8 @@ IStorage storage = await IndexedDbStorage.IsOpfsAvailableAsync()
 
 ## EF Core
 
-The provider maps entity types onto the same `[Table]` types the engine uses — the descriptor the
-source generator emits is the model — and needs no configuration beyond the database itself:
+The provider maps entity types onto the same `[Table]` types the engine uses - the descriptor the
+source generator emits is the model - and needs no configuration beyond the database itself:
 
 ```csharp
 public sealed class AppContext(DbContextOptions<AppContext> options) : DbContext(options)
@@ -182,8 +182,8 @@ from anything EF does:
   reaches storage on the flush interval, or immediately if you call `db.FlushAsync()`.
 
 LINQ is translated as far as the engine's plan model reaches: an index source chosen from equality,
-range and ordering predicates, then filters, ordering and paging. Everything else — projections,
-grouping, aggregates, joins between local sequences — runs as LINQ to Objects over the rows the plan
+range and ordering predicates, then filters, ordering and paging. Everything else - projections,
+grouping, aggregates, joins between local sequences - runs as LINQ to Objects over the rows the plan
 returned, which costs nothing extra because those rows are already objects. The exception is
 `Include`: BlazeDb rows have no navigations, so relationships are modelled as key properties and
 queried against the other table directly.
@@ -208,7 +208,7 @@ operations in the WebAssembly runtime, including per-row storage cost.
 
 ## Demo site
 
-`src/BlazeDb.Demo` is an interactive tour of the engine with no external dependencies — no CSS
+`src/BlazeDb.Demo` is an interactive tour of the engine with no external dependencies - no CSS
 framework, no icon font, no JavaScript library, no web fonts. Every page drives the real engine
 in the browser rather than describing it.
 

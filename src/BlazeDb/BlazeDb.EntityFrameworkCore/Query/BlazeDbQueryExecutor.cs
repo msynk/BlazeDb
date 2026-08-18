@@ -11,8 +11,8 @@ namespace BlazeDb.EntityFrameworkCore.Query;
 /// <summary>
 /// Runs a LINQ query against the engine.
 ///
-/// A query is translated as far as the engine's plan model reaches — index source, filters,
-/// ordering, paging — and whatever is left runs as LINQ to Objects over the rows that come back.
+/// A query is translated as far as the engine's plan model reaches - index source, filters,
+/// ordering, paging - and whatever is left runs as LINQ to Objects over the rows that come back.
 /// Nothing is materialized on the way: the objects the query yields are the ones the table holds,
 /// so a tracked entity mutated afterwards has already changed the database in memory, and
 /// <c>SaveChanges</c> is what commits that change to the log.

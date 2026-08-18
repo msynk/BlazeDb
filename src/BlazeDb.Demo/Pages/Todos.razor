@@ -1,7 +1,7 @@
 @page "/todos"
 @inject DemoDbService Db
 
-<PageTitle>Live data — BlazeDb</PageTitle>
+<PageTitle>Live data - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Start" IconName="list" Title="A working app on the real engine"
             Lead="Every list, count and filter below is served by BlazeDb primitives against rows held in this tab's memory. The panel on the right shows the exact code producing what you see.">
@@ -44,7 +44,7 @@ else
             <div class="field">
                 <label class="field-label" for="new-cat">Category</label>
                 <select id="new-cat" class="select" @bind="_newCategory">
-                    <option value="">(null — not indexed)</option>
+                    <option value="">(null - not indexed)</option>
                     @foreach (var c in DemoData.Categories)
                     {
                         <option value="@c">@c</option>
@@ -75,7 +75,7 @@ else
                 <div class="field" style="flex: 0 1 120px">
                     <label class="field-label" for="new-rating">Rating</label>
                     <input id="new-rating" class="input mono" type="number" min="1" max="5" @bind="_newRating" />
-                    <span class="field-hint">int? — null when blank</span>
+                    <span class="field-hint">int? - null when blank</span>
                 </div>
                 <div class="field" style="flex: 0 1 160px">
                     <label class="field-label" for="new-due">Due</label>
@@ -208,7 +208,7 @@ else
                                                 <button class="btn btn-ghost btn-sm" @onclick="() => _editing = null">Cancel</button>
                                             </div>
                                             <div class="tiny muted mt-1 mono">
-                                                table.Update(row) — rewrites the row and every index entry that changed
+                                                table.Update(row) - rewrites the row and every index entry that changed
                                             </div>
                                         </div>
                                     </div>
@@ -216,7 +216,7 @@ else
                                 else
                                 {
                                     <div class="row-item @(todo.Done ? "done" : null)">
-                                        <label class="check" title="Toggle Done — table.Update(row)">
+                                        <label class="check" title="Toggle Done - table.Update(row)">
                                             <input type="checkbox" checked="@todo.Done" @onchange="() => Toggle(todo)" />
                                         </label>
                                         <div class="row-main">
@@ -320,10 +320,10 @@ else
                         <Icon Name="trash" /> Delete every done row
                     </button>
                     <button class="btn btn-sm btn-block" @onclick="FlushNow">
-                        <Icon Name="download" /> FlushAsync — force durability
+                        <Icon Name="download" /> FlushAsync - force durability
                     </button>
                     <button class="btn btn-sm btn-block" @onclick="CheckpointNow">
-                        <Icon Name="layers" /> CheckpointAsync — snapshot &amp; truncate WAL
+                        <Icon Name="layers" /> CheckpointAsync - snapshot &amp; truncate WAL
                     </button>
                     <button class="btn btn-sm btn-block btn-danger" @onclick="ClearAll">
                         <Icon Name="close" /> Delete all rows
@@ -339,7 +339,7 @@ else
                 <p class="small">
                     The status filter and sort order you pick are written to the
                     <code>settings</code> table with <code>Upsert</code> and read back with
-                    <code>Get</code> on load — so they survive a reload alongside your rows.
+                    <code>Get</code> on load - so they survive a reload alongside your rows.
                 </p>
                 <dl class="kv">
                     @foreach (var setting in _todosSettings)
@@ -401,9 +401,9 @@ else
     private bool _isIndexOrdered;
     private string _queryCode = "";
     private string _sourceLabel = "";
-    private string _lastQueryTime = "—";
+    private string _lastQueryTime = "-";
     private string _lastOp = "none yet";
-    private string _lastOpTime = "—";
+    private string _lastOpTime = "-";
     private string? _keyResult;
     private string _keyInput = "";
     private string? _maintenance;
@@ -446,7 +446,7 @@ else
 
         var lines = new List<string> { "Query<Guid, TodoEntry>.From(todos)" };
 
-        // 1. Source — the most selective index available wins.
+        // 1. Source - the most selective index available wins.
         var query = Query<Guid, TodoEntry>.From(_todos);
         var statusHandled = false;
         var categoryHandled = false;
@@ -457,14 +457,14 @@ else
         {
             query = query.UseIndex(TodoEntry.Indexes.Category, _category);
             lines.Add($"    .UseIndex(TodoEntry.Indexes.Category, \"{_category}\")");
-            _sourceLabel = "hash index — Category";
+            _sourceLabel = "hash index - Category";
             categoryHandled = true;
         }
         else if (SelectedPriority is { } priority)
         {
             query = query.UseIndex(TodoEntry.Indexes.ByPriority, priority);
             lines.Add($"    .UseIndex(TodoEntry.Indexes.ByPriority, Priority.{priority})");
-            _sourceLabel = "hash index — ByPriority (custom name)";
+            _sourceLabel = "hash index - ByPriority (custom name)";
             priorityHandled = true;
         }
         else if (_status != StatusFilter.All)
@@ -472,7 +472,7 @@ else
             var done = _status == StatusFilter.Done;
             query = query.UseIndex(TodoEntry.Indexes.Done, done);
             lines.Add($"    .UseIndex(TodoEntry.Indexes.Done, {done.ToString().ToLowerInvariant()})");
-            _sourceLabel = "hash index — Done";
+            _sourceLabel = "hash index - Done";
             statusHandled = true;
         }
         else if (_sort is SortMode.Newest or SortMode.Oldest)
@@ -485,7 +485,7 @@ else
                 descending);
             lines.Add("    .UseIndex(TodoEntry.Indexes.CreatedAt,");
             lines.Add($"              Bound<DateTime>.Unbounded, Bound<DateTime>.Unbounded, descending: {descending.ToString().ToLowerInvariant()})");
-            _sourceLabel = "ordered index — CreatedAt";
+            _sourceLabel = "ordered index - CreatedAt";
             orderedSource = true;
         }
         else if (_sort == SortMode.Effort)
@@ -493,12 +493,12 @@ else
             query = query.UseIndex(TodoEntry.Indexes.Effort, Bound<int>.Unbounded, Bound<int>.Unbounded, descending: true);
             lines.Add("    .UseIndex(TodoEntry.Indexes.Effort,");
             lines.Add("              Bound<int>.Unbounded, Bound<int>.Unbounded, descending: true)");
-            _sourceLabel = "ordered index — Effort";
+            _sourceLabel = "ordered index - Effort";
             orderedSource = true;
         }
         else
         {
-            _sourceLabel = "full scan — Scan()";
+            _sourceLabel = "full scan - Scan()";
         }
 
         // 2. Residual predicates for filters the source did not cover.
@@ -529,7 +529,7 @@ else
             lines.Add($"    .Where(t => t.Title.Contains(\"{needle}\", StringComparison.OrdinalIgnoreCase))");
         }
 
-        // 3. Ordering — only needed when the source is not already ordered.
+        // 3. Ordering - only needed when the source is not already ordered.
         if (!orderedSource)
         {
             switch (_sort)
@@ -658,7 +658,7 @@ else
         var updated = todo.Clone();
         updated.Done = !todo.Done;
         _todos.Update(updated);
-        Track("todos.Update(row) — Done flipped, hash index rebucketed", sw);
+        Track("todos.Update(row) - Done flipped, hash index rebucketed", sw);
         Refresh();
     }
 
@@ -741,8 +741,8 @@ else
         });
 
         _maintenance = existed
-            ? "todos.Upsert(row) — key already present, row replaced, count unchanged"
-            : "todos.Upsert(row) — key absent, row inserted";
+            ? "todos.Upsert(row) - key already present, row replaced, count unchanged"
+            : "todos.Upsert(row) - key absent, row inserted";
         Track("todos.Upsert(row)", sw);
         Refresh();
     }
@@ -805,8 +805,8 @@ else
         var sw = Stopwatch.StartNew();
         await _db.FlushAsync();
         _maintenance = Db.IsPersistent
-            ? $"await db.FlushAsync() — WAL durable in {DemoSandbox.Duration(sw.Elapsed.TotalMilliseconds)}"
-            : "await db.FlushAsync() — no-op storage in this session, but the call is identical";
+            ? $"await db.FlushAsync() - WAL durable in {DemoSandbox.Duration(sw.Elapsed.TotalMilliseconds)}"
+            : "await db.FlushAsync() - no-op storage in this session, but the call is identical";
         Track("db.FlushAsync()", sw);
     }
 
@@ -821,7 +821,7 @@ else
         try
         {
             await _db.CheckpointAsync();
-            _maintenance = $"await db.CheckpointAsync() — snapshot written, WAL truncated in {DemoSandbox.Duration(sw.Elapsed.TotalMilliseconds)}";
+            _maintenance = $"await db.CheckpointAsync() - snapshot written, WAL truncated in {DemoSandbox.Duration(sw.Elapsed.TotalMilliseconds)}";
         }
         catch (InvalidOperationException ex)
         {

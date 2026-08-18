@@ -42,7 +42,7 @@ internal interface IBlazeDbTableBinding
 
 /// <summary>
 /// One secondary index, described in the terms the translator reasons about: which properties it
-/// covers, whether it can answer ranges as well as equality, and the type of its key — a tuple
+/// covers, whether it can answer ranges as well as equality, and the type of its key - a tuple
 /// when the index is compound, which is what a lookup against it has to be given.
 /// </summary>
 internal sealed record BlazeDbIndex(
@@ -161,7 +161,7 @@ internal static class BlazeDbTableResolver
 
 /// <summary>
 /// Rebuilds an entity as it was when the change tracker last saw it. Rows are live objects, so a
-/// modified entity no longer carries the values its index entries were built from — this restores
+/// modified entity no longer carries the values its index entries were built from - this restores
 /// them into a throwaway copy the engine can use to retract those entries.
 /// </summary>
 internal static class OriginalValueFactory

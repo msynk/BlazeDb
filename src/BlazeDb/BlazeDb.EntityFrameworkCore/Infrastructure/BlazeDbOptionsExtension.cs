@@ -5,7 +5,7 @@ namespace BlazeDb.EntityFrameworkCore.Infrastructure;
 
 /// <summary>
 /// Carries the engine instance the context runs against. BlazeDb databases are opened and owned by
-/// the application — one per origin, holding the writer lock — so the provider is handed a live
+/// the application - one per origin, holding the writer lock - so the provider is handed a live
 /// <see cref="Database"/> rather than a connection string it would open itself.
 /// </summary>
 public sealed class BlazeDbOptionsExtension : IDbContextOptionsExtension
@@ -52,8 +52,8 @@ public sealed class BlazeDbOptionsExtension : IDbContextOptionsExtension
 
         public override string LogFragment => "using BlazeDb ";
 
-        // Which database a context talks to is not part of the service graph — the provider reads
-        // it from the options per context — so every BlazeDb context can share one service
+        // Which database a context talks to is not part of the service graph - the provider reads
+        // it from the options per context - so every BlazeDb context can share one service
         // provider. Keying on the database instance instead would build a new one per database and
         // trip EF's "too many service providers" guard in any app that opens more than a few.
         public override int GetServiceProviderHashCode() => 0;

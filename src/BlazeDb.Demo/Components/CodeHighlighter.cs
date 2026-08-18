@@ -137,7 +137,7 @@ public static class CodeHighlighter
                 continue;
             }
 
-            // Attribute usage — a bracket that opens a line
+            // Attribute usage - a bracket that opens a line
             if (c == '[' && lineStart)
             {
                 Span(sb, "tok-p", "[");

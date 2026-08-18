@@ -3,10 +3,10 @@
 @inject DemoDbService Db
 @inject AppInterop Interop
 
-<PageTitle>Storage backends — BlazeDb</PageTitle>
+<PageTitle>Storage backends - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Persistence" IconName="disk" Title="Four methods are the entire storage contract"
-            Lead="The engine never assumes a file system. It asks for bytes by name, replaces them atomically, appends to them and deletes them. Everything else — OPFS, a directory on disk, a dictionary in a test — is an implementation detail.">
+            Lead="The engine never assumes a file system. It asks for bytes by name, replaces them atomically, appends to them and deletes them. Everything else - OPFS, a directory on disk, a dictionary in a test - is an implementation detail.">
     <span class="chip @(Db.IsPersistent ? "on" : null)"><Icon Name="disk" /> @Db.StorageLabel</span>
     <span class="chip"><Icon Name="history" /> @(Db.Trace?.CallCount ?? 0) calls traced</span>
     @if (_quota > 0)
@@ -68,13 +68,13 @@
                     </tr>
                     <tr>
                         <td class="mono strong">null</td>
-                        <td class="mono">—</td>
+                        <td class="mono">-</td>
                         <td class="mono">Storage = null</td>
                         <td>No persistence at all. Nothing is serialized, so this is the fastest configuration.</td>
                     </tr>
                     <tr>
                         <td class="mono strong">your own</td>
-                        <td class="mono">—</td>
+                        <td class="mono">-</td>
                         <td class="mono">class X : IStorage</td>
                         <td>Anything addressable by name: a remote blob store, an encrypting wrapper, a tracing decorator like the one below.</td>
                     </tr>
@@ -115,7 +115,7 @@
                                 <span class="log-seq">@op.Seq</span>
                                 <span class="log-op @OpClass(op.Operation)">@op.Operation</span>
                                 <span class="log-name">@op.File</span>
-                                <span class="log-meta">@(op.Bytes > 0 ? DemoSandbox.Bytes(op.Bytes) : "—")</span>
+                                <span class="log-meta">@(op.Bytes > 0 ? DemoSandbox.Bytes(op.Bytes) : "-")</span>
                                 <span class="log-meta">@DemoSandbox.Duration(op.Ms)</span>
                             </div>
                         }
@@ -215,7 +215,7 @@
             <Callout Tone="info" Title="What the browser backend does not do.">
                 There is no queue for becoming the writer, no notification when the lock frees up, and
                 cancellation tokens are accepted but not forwarded to JavaScript. Reader tabs are not a
-                feature yet — see the <a href="roadmap">roadmap</a>.
+                feature yet - see the <a href="roadmap">roadmap</a>.
             </Callout>
         </div>
     </div>
@@ -318,7 +318,7 @@
 
             _note =
                 $"await db.CheckpointAsync()\n" +
-                $"{(Db.Trace?.CallCount ?? 0) - before} storage calls in {DemoSandbox.Duration(sw.Elapsed.TotalMilliseconds)} — " +
+                $"{(Db.Trace?.CallCount ?? 0) - before} storage calls in {DemoSandbox.Duration(sw.Elapsed.TotalMilliseconds)} - " +
                 "snapshot written, manifest replaced atomically, old log deleted.";
         }
         catch (Exception ex)

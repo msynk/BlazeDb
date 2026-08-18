@@ -39,7 +39,7 @@ public partial class TodoEntry
     [OrderedIndex]
     public DateTime CreatedAt { get; set; }
 
-    /// <summary>Estimated minutes of work — the numeric ordered index.</summary>
+    /// <summary>Estimated minutes of work - the numeric ordered index.</summary>
     [OrderedIndex]
     public int Effort { get; set; }
 

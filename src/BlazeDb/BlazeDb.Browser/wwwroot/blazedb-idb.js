@@ -1,5 +1,5 @@
 // BlazeDb IndexedDB storage module.
-// Fallback for contexts where OPFS is unavailable — notably Firefox private windows and older
+// Fallback for contexts where OPFS is unavailable - notably Firefox private windows and older
 // Safari. Each BlazeDb "file" is one record in a single object store keyed by file name.
 //
 // IndexedDB has no append primitive, so a WAL append is a read-modify-write of the record. That

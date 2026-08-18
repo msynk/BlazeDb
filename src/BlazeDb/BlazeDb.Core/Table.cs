@@ -111,7 +111,7 @@ public sealed class Table<TKey, TRow> : ITableInternal
 
     /// <summary>
     /// Equality lookup against an index chosen at runtime. See
-    /// <see cref="IIndexStore{TRow}.LookupBoxed"/> — this exists for the EF Core provider, which
+    /// <see cref="IIndexStore{TRow}.LookupBoxed"/> - this exists for the EF Core provider, which
     /// picks an index from a LINQ predicate and has no static knowledge of the key type.
     /// </summary>
     internal IEnumerable<TRow> LookupBoxed(IndexDefinition<TRow> index, object key) =>
@@ -183,8 +183,8 @@ public sealed class Table<TKey, TRow> : ITableInternal
     // ---- Writes against rows that were mutated in place ----
     //
     // Callers normally hand the table a new row object, so the entry it still holds describes the
-    // values its indexes were built from. A caller that instead mutates the stored instance —
-    // which is what an EF Core change tracker does, since queries hand back the live row — leaves
+    // values its indexes were built from. A caller that instead mutates the stored instance -
+    // which is what an EF Core change tracker does, since queries hand back the live row - leaves
     // the table unable to work out which index entries to retract. These two methods take that
     // earlier state explicitly. Everything downstream (index maintenance, undo, WAL records) is
     // the ordinary path.

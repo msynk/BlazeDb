@@ -1,10 +1,10 @@
 @page "/schema"
 @inject DemoDbService Db
 
-<PageTitle>Schema &amp; codegen — BlazeDb</PageTitle>
+<PageTitle>Schema &amp; codegen - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Engine" IconName="schema" Title="Schema comes from your types"
-            Lead="A Roslyn incremental generator turns an annotated partial class into a table descriptor, binary serializers, a key extractor and index definitions — all at compile time, so nothing is reflected at runtime.">
+            Lead="A Roslyn incremental generator turns an annotated partial class into a table descriptor, binary serializers, a key extractor and index definitions - all at compile time, so nothing is reflected at runtime.">
     <span class="chip"><Icon Name="cpu" /> Trimming &amp; AOT safe</span>
     <span class="chip"><Icon Name="index" /> @TodoEntry.Table.Indexes.Count index definitions generated</span>
     <span class="chip"><Icon Name="code" /> 7 compile-time diagnostics</span>
@@ -72,8 +72,8 @@
 
     <div class="grid grid-3 mt-2">
         <StatTile Label="todos rows" IconName="database" Value="@RowCount(TodoEntry.Table.Name)" Note="live table" />
-        <StatTile Label="settings rows" IconName="key" Value="@(Db.IsOpen ? Db.Settings.Count.ToString() : "—")" Note="string keys, explicit field numbers" />
-        <StatTile Label="metrics rows" IconName="gauge" Value="@(_metrics?.Count.ToString() ?? "—")" Note="hand-written descriptor" />
+        <StatTile Label="settings rows" IconName="key" Value="@(Db.IsOpen ? Db.Settings.Count.ToString() : "-")" Note="string keys, explicit field numbers" />
+        <StatTile Label="metrics rows" IconName="gauge" Value="@(_metrics?.Count.ToString() ?? "-")" Note="hand-written descriptor" />
     </div>
 </Section>
 
@@ -93,7 +93,7 @@
                     <tr>
                         <td class="mono strong">[Key]</td>
                         <td>property</td>
-                        <td>Exactly one per table. Must be a non-nullable scalar — <code>int?</code>, <code>string?</code> and <code>byte[]</code> are rejected.</td>
+                        <td>Exactly one per table. Must be a non-nullable scalar - <code>int?</code>, <code>string?</code> and <code>byte[]</code> are rejected.</td>
                     </tr>
                     <tr>
                         <td class="mono strong">[Index]</td>
@@ -123,7 +123,7 @@
     <Callout Tone="ok" Title="Proof that [Ignore] is honoured.">
         A row with <code>Transient = "@IgnoreProbeInput"</code> was serialized and read back through the
         generated <code>RowWriter</code>/<code>RowReader</code>; the decoded value is
-        <code>"@_ignoreProbeResult"</code> — the field initialiser, not the value that was written.
+        <code>"@_ignoreProbeResult"</code> - the field initialiser, not the value that was written.
     </Callout>
 </Section>
 
@@ -156,9 +156,9 @@
         <div class="flex-col gap-lg">
             <Panel Title="Nullable and repeated" IconName="layers">
                 <ul class="small">
-                    <li><code>T?</code> for any supported value scalar — omitted from the wire when null.</li>
-                    <li><code>string?</code> — omitted when null.</li>
-                    <li><code>T[]</code> and <code>List&lt;T&gt;</code> of any supported scalar — written as repeated tags.</li>
+                    <li><code>T?</code> for any supported value scalar - omitted from the wire when null.</li>
+                    <li><code>string?</code> - omitted when null.</li>
+                    <li><code>T[]</code> and <code>List&lt;T&gt;</code> of any supported scalar - written as repeated tags.</li>
                     <li>A null collection is omitted; a non-null empty one round-trips as empty.</li>
                 </ul>
             </Panel>
@@ -167,9 +167,9 @@
                 <ul class="small">
                     <li>Nested or complex property types (another class, struct or record).</li>
                     <li><code>Dictionary&lt;,&gt;</code>, <code>HashSet&lt;T&gt;</code>, <code>IEnumerable&lt;T&gt;</code>.</li>
-                    <li><code>byte[]</code> as a collection element — <code>List&lt;byte[]&gt;</code> is out.</li>
+                    <li><code>byte[]</code> as a collection element - <code>List&lt;byte[]&gt;</code> is out.</li>
                     <li>Generic or nested table types.</li>
-                    <li>Properties without both a getter and a setter — silently skipped.</li>
+                    <li>Properties without both a getter and a setter - silently skipped.</li>
                     <li>Indexing a collection property.</li>
                 </ul>
                 <p class="small muted mb-0">
@@ -208,7 +208,7 @@
                     <tr>
                         <td class="mono strong">BLZ004</td>
                         <td>Needs a parameterless constructor</td>
-                        <td class="mono">record Foo(int Id) — positional only</td>
+                        <td class="mono">record Foo(int Id) - positional only</td>
                     </tr>
                     <tr>
                         <td class="mono strong">BLZ005</td>
@@ -231,7 +231,7 @@
     </Panel>
     <Callout Tone="info" Title="Requirements at a glance.">
         A table type must be <code>partial</code>, top level, non-generic, have exactly one
-        <code>[Key]</code> and — if it is a class — a parameterless constructor. Records work as long
+        <code>[Key]</code> and - if it is a class - a parameterless constructor. Records work as long
         as they are not positional-only.
     </Callout>
 </Section>
@@ -241,7 +241,7 @@
     <div class="grid grid-2">
         <CodeBlock Title="Hand-written descriptor" Code="@ManualSource" />
 
-        <Panel Title="metrics — live, hand-written" IconName="gauge">
+        <Panel Title="metrics - live, hand-written" IconName="gauge">
             <Actions>
                 <button class="btn btn-sm" @onclick="AddMetric"><Icon Name="plus" /> Insert</button>
             </Actions>
@@ -252,7 +252,7 @@
                 }
                 else if (_metricRows.Count == 0)
                 {
-                    <div class="empty"><Icon Name="gauge" /><div>No metrics yet — insert one.</div></div>
+                    <div class="empty"><Icon Name="gauge" /><div>No metrics yet - insert one.</div></div>
                 }
                 else
                 {
@@ -349,7 +349,7 @@
         return TodoEntry.Table.RowReader(ref reader).Transient;
     }
 
-    private string RowCount(string _) => Db.IsOpen ? Db.Todos.Count.ToString("N0") : "—";
+    private string RowCount(string _) => Db.IsOpen ? Db.Todos.Count.ToString("N0") : "-";
 
     private static string TypeName(Type type)
     {
@@ -490,7 +490,7 @@
 
         public static class MetricTable
         {
-            // A case-insensitive hash index — attributes cannot express this.
+            // A case-insensitive hash index - attributes cannot express this.
             public static readonly HashIndexDefinition<Metric, string> ByName =
                 new("ByName", static m => m.Name, StringComparer.OrdinalIgnoreCase);
 

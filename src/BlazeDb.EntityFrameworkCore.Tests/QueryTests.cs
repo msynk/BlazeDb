@@ -140,7 +140,7 @@ public class QueryTests
         using var context = test.CreateContext();
 
         // GroupBy has no plan equivalent, so it runs as LINQ to Objects over the rows the plan
-        // produced — which is free, because those rows are already objects in memory.
+        // produced - which is free, because those rows are already objects in memory.
         var byCity = context.People
             .GroupBy(p => p.City)
             .Select(g => new { City = g.Key, Count = g.Count() })
@@ -167,7 +167,7 @@ public class QueryTests
         await using var test = await SeededAsync();
         using var context = test.CreateContext();
 
-        // Take then Where means "of the first two rows, the London ones" — the plan must not
+        // Take then Where means "of the first two rows, the London ones" - the plan must not
         // reorder that into "the first two London rows".
         var expected = test.People.Scan().Take(2).Count(p => p.City == "London");
 

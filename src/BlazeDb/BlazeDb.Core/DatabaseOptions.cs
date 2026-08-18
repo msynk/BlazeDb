@@ -41,7 +41,7 @@ public sealed class DatabaseOptions
     /// <summary>
     /// Opens the database as a read-only replica: state is recovered from storage as usual, but
     /// nothing is ever written back and any attempt to mutate a table throws. This is what a
-    /// second browser tab uses — only one tab may hold the writer lock, and the others follow
+    /// second browser tab uses - only one tab may hold the writer lock, and the others follow
     /// along by reloading (see <see cref="Database.ReloadAsync"/>).
     /// </summary>
     public bool ReadOnly { get; set; }

@@ -1,6 +1,6 @@
 @page "/serialization"
 
-<PageTitle>Wire format — BlazeDb</PageTitle>
+<PageTitle>Wire format - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Persistence" IconName="binary" Title="See the bytes a row becomes"
             Lead="Rows are encoded with a tagged, self-describing binary format: a varint tag carrying a field number and a wire type, then the payload. Property names never appear, unknown fields can be skipped, and nulls cost nothing at all.">
@@ -10,24 +10,24 @@
 </PageHeader>
 
 <Section Title="Build a row, watch it encode" IconName="play"
-         Lead="Every control here changes the row that is serialized with the generated writer. Nothing is simulated — the bytes below come from TodoEntry.Table.RowWriter.">
+         Lead="Every control here changes the row that is serialized with the generated writer. Nothing is simulated - the bytes below come from TodoEntry.Table.RowWriter.">
     <div class="grid grid-sidebar">
         <div class="flex-col gap-lg">
             <Panel Title="The row" IconName="code">
                 <div class="form-row">
                     <div class="field" style="flex:3 1 220px">
-                        <label class="field-label" for="w-title">Title — string</label>
+                        <label class="field-label" for="w-title">Title - string</label>
                         <input id="w-title" class="input" @bind="_title" @bind:event="oninput" @bind:after="Encode" />
                     </div>
                     <div class="field" style="flex:0 1 120px">
-                        <label class="field-label" for="w-effort">Effort — int</label>
+                        <label class="field-label" for="w-effort">Effort - int</label>
                         <input id="w-effort" class="input mono" type="number" @bind="_effort" @bind:after="Encode" />
                     </div>
                 </div>
 
                 <div class="form-row mt-2">
                     <div class="field" style="flex:2 1 200px">
-                        <label class="field-label" for="w-notes">Notes — string?</label>
+                        <label class="field-label" for="w-notes">Notes - string?</label>
                         <input id="w-notes" class="input" disabled="@_notesNull" placeholder="(null)"
                                @bind="_notes" @bind:event="oninput" @bind:after="Encode" />
                         <label class="check mt-1">
@@ -35,7 +35,7 @@
                         </label>
                     </div>
                     <div class="field" style="flex:0 1 130px">
-                        <label class="field-label" for="w-rating">Rating — int?</label>
+                        <label class="field-label" for="w-rating">Rating - int?</label>
                         <input id="w-rating" class="input mono" type="number" min="1" max="5" disabled="@_ratingNull"
                                @bind="_rating" @bind:after="Encode" />
                         <label class="check mt-1">
@@ -43,12 +43,12 @@
                         </label>
                     </div>
                     <div class="field" style="flex:0 1 140px">
-                        <label class="field-label" for="w-tags">Tags — List&lt;string&gt;</label>
+                        <label class="field-label" for="w-tags">Tags - List&lt;string&gt;</label>
                         <input id="w-tags" class="input mono" type="number" min="0" max="6" @bind="_tagCount" @bind:after="Encode" />
                         <span class="field-hint">repeated field 14</span>
                     </div>
                     <div class="field" style="flex:0 1 140px">
-                        <label class="field-label" for="w-payload">Payload — byte[]</label>
+                        <label class="field-label" for="w-payload">Payload - byte[]</label>
                         <input id="w-payload" class="input mono" type="number" min="0" max="16" @bind="_payloadSize" @bind:after="Encode" />
                         <span class="field-hint">length-delimited blob</span>
                     </div>
@@ -140,7 +140,7 @@
 
             <Panel Title="Nulls are free" IconName="bolt">
                 <p class="small mb-2">
-                    A null value is not a marker byte — the field is simply absent.
+                    A null value is not a marker byte - the field is simply absent.
                 </p>
                 <div class="table-wrap">
                     <table class="data">
@@ -178,7 +178,7 @@
             <Panel Title="Why field numbers, not names" IconName="key">
                 <p class="small">
                     Names would cost bytes in every row and would tie the format to your identifiers.
-                    Numbers keep rows compact and let you rename a property freely — the persisted data
+                    Numbers keep rows compact and let you rename a property freely - the persisted data
                     does not notice.
                 </p>
                 <p class="small mb-0">
@@ -189,7 +189,7 @@
             </Panel>
             <Callout Tone="warn" Title="Pin your numbers before you ship.">
                 Add <code>[Field(n)]</code> to every property once real data exists. After that you can
-                reorder, rename and delete properties safely — only the numbers matter.
+                reorder, rename and delete properties safely - only the numbers matter.
             </Callout>
         </div>
     </div>
@@ -241,9 +241,9 @@
 </Section>
 
 <Section Title="Keys and explicit numbering" IconName="key"
-         Lead="Keys are serialized separately from rows — the log needs a key on its own to record a delete.">
+         Lead="Keys are serialized separately from rows - the log needs a key on its own to record a delete.">
     <div class="grid grid-2">
-        <Panel Title="Setting — [Field(1)], [Field(2)], [Field(3)]" IconName="file" Flush="true">
+        <Panel Title="Setting - [Field(1)], [Field(2)], [Field(3)]" IconName="file" Flush="true">
             <Actions>
                 <span class="panel-sub mono">@_settingBytes.Length bytes</span>
             </Actions>
@@ -508,7 +508,7 @@
         catch (InvalidDataException ex)
         {
             _truncatedResult =
-                "0a 10 01 02  — field 1, length-delimited, declares 16 bytes but supplies 2\n" +
+                "0a 10 01 02  - field 1, length-delimited, declares 16 bytes but supplies 2\n" +
                 $"InvalidDataException: {ex.Message}";
         }
     }
@@ -554,7 +554,7 @@
 
         var reader = new BufferReader(writer.WrittenSpan);
         var decoded = TodoEntry.Table.RowReader(ref reader);
-        // Succeeds — the unknown tag is skipped by wire type alone.
+        // Succeeds - the unknown tag is skipped by wire type alone.
         """;
 
     private const string KeySnippet = """
@@ -574,7 +574,7 @@
         WriteTag(fieldNumber, wireType)
         WrittenSpan / WrittenMemory / ToArray() / Reset()
 
-        // Reader — a ref struct over a ReadOnlySpan<byte>
+        // Reader - a ref struct over a ReadOnlySpan<byte>
         ReadVarInt / ReadVarUInt / ReadFixed32 / ReadFixed64
         ReadBool / ReadSingle / ReadDouble / ReadDecimal
         ReadString / ReadBytes / ReadGuid

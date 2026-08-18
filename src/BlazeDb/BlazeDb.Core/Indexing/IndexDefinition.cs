@@ -59,7 +59,7 @@ internal interface IIndexStore<TRow>
 
     /// <summary>
     /// Equality lookup with the key passed as <see cref="object"/>. For callers that pick an index
-    /// at runtime — the EF Core provider translating a LINQ predicate — and so cannot name the key
+    /// at runtime - the EF Core provider translating a LINQ predicate - and so cannot name the key
     /// type. The cast happens inside the already-instantiated generic store, so no reflection or
     /// runtime code generation is involved.
     /// </summary>
@@ -67,7 +67,7 @@ internal interface IIndexStore<TRow>
 
     /// <summary>
     /// Range scan with boxed bounds; see <see cref="LookupBoxed"/>. Only ordered indexes support
-    /// it — a hash index throws.
+    /// it - a hash index throws.
     /// </summary>
     IEnumerable<TRow> RangeBoxed(bool hasFrom, object? from, bool hasTo, object? to, bool descending);
 }

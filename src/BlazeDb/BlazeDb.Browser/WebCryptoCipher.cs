@@ -29,7 +29,7 @@ internal static partial class CryptoInterop
 /// AES-GCM backed by the browser's WebCrypto implementation, for use with
 /// <see cref="EncryptedStorage"/> in Blazor WebAssembly. The managed
 /// <see cref="System.Security.Cryptography.AesGcm"/> throws in the browser sandbox, so encryption
-/// at rest in the browser has to go through SubtleCrypto — which is asynchronous, hence the
+/// at rest in the browser has to go through SubtleCrypto - which is asynchronous, hence the
 /// async shape of <see cref="IAeadCipher"/>.
 /// </summary>
 [SupportedOSPlatform("browser")]
@@ -42,7 +42,7 @@ public sealed class WebCryptoCipher : IAeadCipher, IDisposable
 
     /// <summary>
     /// Imports a raw AES key (16, 24 or 32 bytes) as a non-extractable WebCrypto key. Derive one
-    /// from a passphrase with <see cref="EncryptedStorage.DeriveKey"/>, which uses PBKDF2 — one of
+    /// from a passphrase with <see cref="EncryptedStorage.DeriveKey"/>, which uses PBKDF2 - one of
     /// the few managed primitives that does work in the browser.
     /// </summary>
     public static async ValueTask<WebCryptoCipher> CreateAsync(byte[] rawKey, string? moduleUrl = null)

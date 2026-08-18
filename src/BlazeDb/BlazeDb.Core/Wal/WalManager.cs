@@ -189,8 +189,8 @@ internal sealed class WalManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Estimates are comparatively expensive — in the browser it is an async trip through
-    /// <c>navigator.storage.estimate()</c> — so the last one is carried forward by adding the bytes
+    /// Estimates are comparatively expensive - in the browser it is an async trip through
+    /// <c>navigator.storage.estimate()</c> - so the last one is carried forward by adding the bytes
     /// written since. That projection only ever overstates usage (deletes are ignored), so it is
     /// safe to trust until it says we are nearing the limit, which is when a fresh reading is taken.
     /// </summary>
@@ -335,7 +335,7 @@ internal sealed class WalManager : IAsyncDisposable
                 newGeneration = _generation + 1;
                 snapshotBytes = BuildSnapshot(snapshotLsn);
                 // Everything buffered so far has LSN <= snapshotLsn and is superseded by the
-                // snapshot — but only once that snapshot is actually durable, so keep a copy.
+                // snapshot - but only once that snapshot is actually durable, so keep a copy.
                 supersededPending = _pending.ToArray();
                 _pending.Reset();
             }
@@ -427,7 +427,7 @@ internal sealed class WalManager : IAsyncDisposable
             if (validLength < walBytes.Length && !_options.ReadOnly)
             {
                 // Torn tail detected: truncate so future appends continue from a clean point.
-                // A replica leaves it alone — repair is the writer's job, and the tail may simply
+                // A replica leaves it alone - repair is the writer's job, and the tail may simply
                 // be a commit the writer is in the middle of appending.
                 await _storage.WriteAtomicAsync(_walFile, walBytes.AsMemory(0, validLength), ct).ConfigureAwait(false);
             }

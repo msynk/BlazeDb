@@ -7,7 +7,7 @@ public sealed record StorageOp(int Seq, string Operation, string File, int Bytes
 
 /// <summary>
 /// A decorator over any <see cref="IStorage"/> that records every call the engine
-/// makes. This is the whole storage contract — four methods — so writing one is
+/// makes. This is the whole storage contract - four methods - so writing one is
 /// all it takes to put BlazeDb on a new backend.
 /// </summary>
 public sealed class InstrumentedStorage(IStorage inner, int capacity = 500) : IStorage

@@ -89,7 +89,7 @@ internal sealed class BlazeDbQueryCompiler : IQueryCompiler
 
     /// <summary>
     /// Ahead-of-time query precompilation emits the code EF's pipeline would have generated, and
-    /// there is no such code here — translation is a handful of expression walks that run in
+    /// there is no such code here - translation is a handful of expression walks that run in
     /// microseconds, so there is nothing to save by doing it at build time.
     /// </summary>
     public Expression<Func<QueryContext, TResult>> PrecompileQuery<TResult>(Expression query, bool async) =>

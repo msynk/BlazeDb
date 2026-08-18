@@ -1,7 +1,7 @@
 @page "/queries"
 @inject DemoDbService Db
 
-<PageTitle>Query primitives — BlazeDb</PageTitle>
+<PageTitle>Query primitives - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Engine" IconName="query" Title="Querying without a query language"
             Lead="Query is a tiny composable pipeline: pick at most one index as the source, add residual predicates, optionally sort, then page. Build one below and watch the code, the plan and the timing update as you go.">
@@ -148,7 +148,7 @@ else
                     <div class="field">
                         <label class="field-label" for="q-order">OrderBy</label>
                         <select id="q-order" class="select" @bind="_order" @bind:after="Run">
-                            <option value="@OrderKind.None">none — keep source order</option>
+                            <option value="@OrderKind.None">none - keep source order</option>
                             <option value="@OrderKind.Title">t =&gt; t.Title</option>
                             <option value="@OrderKind.EffortDesc">t =&gt; t.Effort, descending</option>
                             <option value="@OrderKind.CreatedDesc">t =&gt; t.CreatedAt, descending</option>
@@ -184,7 +184,7 @@ else
                         <div class="panel-body">
                             <div class="stat-value" style="font-size:2.2rem">@_count.ToString("N0")</div>
                             <p class="small muted mb-0">
-                                <code>Count()</code> runs the whole pipeline and counts what comes out —
+                                <code>Count()</code> runs the whole pipeline and counts what comes out -
                                 it is not a shortcut around the predicates.
                             </p>
                         </div>
@@ -231,7 +231,7 @@ else
                                             <td class="mono">@(row.Category ?? "null")</td>
                                             <td><span class="prio @row.Priority">@row.Priority</span></td>
                                             <td class="num mono">@row.Effort</td>
-                                            <td class="num mono">@(row.Rating?.ToString() ?? "—")</td>
+                                            <td class="num mono">@(row.Rating?.ToString() ?? "-")</td>
                                             <td class="mono tiny">@row.CreatedAt.ToLocalTime().ToString("MMM d HH:mm")</td>
                                         </tr>
                                     }
@@ -274,9 +274,9 @@ else
 
             <Panel Title="Execution order" IconName="arrow-down">
                 <ol class="small mb-0">
-                    <li><strong>Source</strong> — index lookup, index range, or a full <code>Scan</code>.</li>
-                    <li><strong>Predicates</strong> — each <code>Where</code> in the order added.</li>
-                    <li><strong>Order</strong> — only if <code>OrderBy</code> was called.</li>
+                    <li><strong>Source</strong> - index lookup, index range, or a full <code>Scan</code>.</li>
+                    <li><strong>Predicates</strong> - each <code>Where</code> in the order added.</li>
+                    <li><strong>Order</strong> - only if <code>OrderBy</code> was called.</li>
                     <li><strong>Skip</strong>, then <strong>Take</strong>.</li>
                 </ol>
             </Panel>
@@ -298,7 +298,7 @@ else
                 <p class="small mb-0">
                     There is no join, no grouping and no aggregate beyond counting. Compose the
                     primitives in ordinary C#, or use LINQ over <code>Scan()</code> when a query is
-                    genuinely ad hoc — a scan over in-memory objects is already fast.
+                    genuinely ad hoc - a scan over in-memory objects is already fast.
                 </p>
             </Panel>
         </div>
@@ -314,7 +314,7 @@ else
 
     private static readonly (SourceKind Kind, string Label)[] SourceOptions =
     [
-        (SourceKind.Scan, "Scan() — no index"),
+        (SourceKind.Scan, "Scan() - no index"),
         (SourceKind.HashDone, "UseIndex(Done)"),
         (SourceKind.HashCategory, "UseIndex(Category)"),
         (SourceKind.HashPriority, "UseIndex(ByPriority)"),
@@ -356,7 +356,7 @@ else
     private int _predicateCount;
     private string _code = "";
     private string _sourceLabel = "";
-    private string _elapsed = "—";
+    private string _elapsed = "-";
     private string _resultSummary = "";
     private string? _twoSourceError;
 
@@ -390,19 +390,19 @@ else
                 var done = _doneKey == "true";
                 query = query.UseIndex(TodoEntry.Indexes.Done, done);
                 lines.Add($"    .UseIndex(TodoEntry.Indexes.Done, {_doneKey})");
-                _sourceLabel = "hash — Done";
+                _sourceLabel = "hash - Done";
                 break;
 
             case SourceKind.HashCategory:
                 query = query.UseIndex(TodoEntry.Indexes.Category, _category);
                 lines.Add($"    .UseIndex(TodoEntry.Indexes.Category, \"{_category}\")");
-                _sourceLabel = "hash — Category";
+                _sourceLabel = "hash - Category";
                 break;
 
             case SourceKind.HashPriority:
                 query = query.UseIndex(TodoEntry.Indexes.ByPriority, _priority);
                 lines.Add($"    .UseIndex(TodoEntry.Indexes.ByPriority, Priority.{_priority})");
-                _sourceLabel = "hash — ByPriority";
+                _sourceLabel = "hash - ByPriority";
                 break;
 
             case SourceKind.OrderedEffort:
@@ -413,7 +413,7 @@ else
                 lines.Add($"              {(_fromUnbounded ? "Bound<int>.Unbounded" : _effortFrom.ToString())},");
                 lines.Add($"              {(_toUnbounded ? "Bound<int>.Unbounded" : _effortTo.ToString())},");
                 lines.Add($"              descending: {Lower(_sourceDescending)})");
-                _sourceLabel = "ordered — Effort";
+                _sourceLabel = "ordered - Effort";
                 break;
 
             case SourceKind.OrderedCreatedAt:
@@ -425,7 +425,7 @@ else
                 lines.Add($"              {(_fromUnbounded ? "Bound<DateTime>.Unbounded" : $"DateTime.UtcNow.AddDays(-{_days})")},");
                 lines.Add($"              {(_toUnbounded ? "Bound<DateTime>.Unbounded" : "DateTime.UtcNow")},");
                 lines.Add($"              descending: {Lower(_sourceDescending)})");
-                _sourceLabel = "ordered — CreatedAt";
+                _sourceLabel = "ordered - CreatedAt";
                 break;
 
             default:
@@ -530,9 +530,9 @@ else
                 break;
 
             case ExecuteKind.Projection:
-                lines.Add("    .Execute(t => $\"{t.Title} — {t.Effort} min\")");
+                lines.Add("    .Execute(t => $\"{t.Title} - {t.Effort} min\")");
                 lines.Add("    .ToList();");
-                _projected = query.Execute(t => $"{t.Title} — {t.Effort} min").ToList();
+                _projected = query.Execute(t => $"{t.Title} - {t.Effort} min").ToList();
                 _returned = _projected.Count;
                 _resultSummary = $"{_returned} projected values";
                 break;
@@ -568,7 +568,7 @@ else
         {
             var query = Query<Guid, TodoEntry>.From(_todos).UseIndex(TodoEntry.Indexes.Done, true);
             query.UseIndex(TodoEntry.Indexes.Effort, Bound<int>.Unbounded, Bound<int>.Unbounded);
-            _twoSourceError = "No exception — unexpected.";
+            _twoSourceError = "No exception - unexpected.";
         }
         catch (InvalidOperationException ex)
         {

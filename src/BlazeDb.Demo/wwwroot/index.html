@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BlazeDb — a memory-first database for the browser</title>
+    <title>BlazeDb - a memory-first database for the browser</title>
     <meta name="description" content="Interactive showcase of BlazeDb: a SQL-free, memory-first embedded database engine for .NET and Blazor WebAssembly with OPFS-backed durability." />
     <meta name="theme-color" content="#08090d" />
     <base href="/" />
@@ -16,7 +16,7 @@
                 var saved = localStorage.getItem('blazedb-theme');
                 var dark = saved ? saved === 'dark' : !window.matchMedia('(prefers-color-scheme: light)').matches;
                 document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-            } catch (e) { /* storage blocked — keep the default */ }
+            } catch (e) { /* storage blocked - keep the default */ }
         })();
     </script>
     <link rel="stylesheet" href="css/app.css" />

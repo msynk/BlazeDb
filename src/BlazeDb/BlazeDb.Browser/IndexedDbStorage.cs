@@ -38,7 +38,7 @@ internal static partial class IndexedDbInterop
 }
 
 /// <summary>
-/// IndexedDB storage backend, for browsers and modes where OPFS is unavailable — Firefox private
+/// IndexedDB storage backend, for browsers and modes where OPFS is unavailable - Firefox private
 /// windows being the common case. Every BlazeDb file becomes one record in a single object store.
 /// <para>
 /// IndexedDB offers no append, so extending the WAL means rewriting its record; the cost grows

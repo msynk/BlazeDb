@@ -5,8 +5,8 @@ using System.Text;
 namespace BlazeDb.Storage;
 
 /// <summary>
-/// Wraps any <see cref="IStorage"/> so everything the engine persists — WAL records, snapshots and
-/// the manifest — is encrypted before it reaches the disk or the origin's file system.
+/// Wraps any <see cref="IStorage"/> so everything the engine persists - WAL records, snapshots and
+/// the manifest - is encrypted before it reaches the disk or the origin's file system.
 /// <para>
 /// Each write becomes a self-contained frame of <c>[version][nonce][length][ciphertext+tag]</c>.
 /// Framing per write is what keeps <see cref="AppendAsync"/> a genuine append: the WAL can keep

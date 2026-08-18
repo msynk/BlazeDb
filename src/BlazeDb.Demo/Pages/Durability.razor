@@ -1,10 +1,10 @@
 @page "/durability"
 @implements IAsyncDisposable
 
-<PageTitle>Durability &amp; recovery — BlazeDb</PageTitle>
+<PageTitle>Durability &amp; recovery - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Persistence" IconName="shield" Title="Crash it on purpose"
-            Lead="This page drives a private database whose storage is a byte dictionary you can vandalise. Flush it, snapshot it, abandon it mid-flight, tear the tail off the log, corrupt a checksum — then reopen and see exactly what survived.">
+            Lead="This page drives a private database whose storage is a byte dictionary you can vandalise. Flush it, snapshot it, abandon it mid-flight, tear the tail off the log, corrupt a checksum - then reopen and see exactly what survived.">
     <span class="chip"><Icon Name="file" /> @_files.Count files</span>
     <span class="chip"><Icon Name="database" /> @(_table?.Count ?? 0) rows in memory</span>
     <span class="chip"><Icon Name="disk" /> @DemoSandbox.Bytes(_totalBytes) on "disk"</span>
@@ -39,7 +39,7 @@
 </Section>
 
 <Section Title="The sandbox" IconName="cpu"
-         Lead="Options are read when a database is opened, so changing either one reopens the database over the same storage — which is itself a recovery.">
+         Lead="Options are read when a database is opened, so changing either one reopens the database over the same storage - which is itself a recovery.">
     <Panel Title="Options" IconName="code">
         <Actions>
             <span class="panel-sub mono">@_optionsCode</span>
@@ -49,7 +49,7 @@
                 <div class="field">
                     <label class="field-label" for="d-flush">FlushInterval</label>
                     <select id="d-flush" class="select" @bind="_flushChoice" @bind:after="ReopenAsync">
-                        <option value="never">never (1 hour — explicit flushes only)</option>
+                        <option value="never">never (1 hour - explicit flushes only)</option>
                         <option value="fast">20 ms</option>
                         <option value="default">100 ms (the default)</option>
                         <option value="slow">1 second</option>
@@ -59,7 +59,7 @@
                     <label class="field-label" for="d-ckpt">CheckpointWalSize</label>
                     <select id="d-ckpt" class="select" @bind="_checkpointChoice" @bind:after="ReopenAsync">
                         <option value="never">disabled (long.MaxValue)</option>
-                        <option value="tiny">2 KB — checkpoints constantly</option>
+                        <option value="tiny">2 KB - checkpoints constantly</option>
                         <option value="small">32 KB</option>
                         <option value="default">4 MB (the default)</option>
                     </select>
@@ -116,7 +116,7 @@
                 </div>
                 <p class="tiny muted mt-2 mb-0">
                     “Crash” abandons the <code>Database</code> instance without disposing it, then opens a
-                    new one over the same bytes — exactly what closing a tab does.
+                    new one over the same bytes - exactly what closing a tab does.
                 </p>
             </Panel>
 
@@ -164,7 +164,7 @@
             <Panel Title="State" IconName="database">
                 <dl class="kv">
                     <dt>Rows in memory</dt>
-                    <dd>@(_table?.Count.ToString("N0") ?? "—")</dd>
+                    <dd>@(_table?.Count.ToString("N0") ?? "-")</dd>
                     <dt>Log size</dt>
                     <dd>@DemoSandbox.Bytes(_walBytes)</dd>
                     <dt>Snapshot size</dt>
@@ -368,7 +368,7 @@
                 $"Inserted {count} rows in one transaction",
                 $"todos.Count → {_table.Count}",
                 _storage.FileNames.Count == beforeFiles && _walBytes == 0
-                    ? $"Committed to memory in {DemoSandbox.Duration(sw.Elapsed.TotalMilliseconds)}. Nothing on disk yet — that is the background flusher's job."
+                    ? $"Committed to memory in {DemoSandbox.Duration(sw.Elapsed.TotalMilliseconds)}. Nothing on disk yet - that is the background flusher's job."
                     : $"Committed in {DemoSandbox.Duration(sw.Elapsed.TotalMilliseconds)}; the log is now {DemoSandbox.Bytes(_walBytes)}.");
 
             if (FlushInterval < TimeSpan.FromSeconds(2))
@@ -376,7 +376,7 @@
                 await Task.Delay(FlushInterval + TimeSpan.FromMilliseconds(120));
                 Refresh();
                 _log.Add("Background flusher ran", $"log is now {DemoSandbox.Bytes(_walBytes)}",
-                    "No await in your write path — the loop caught up on its own.");
+                    "No await in your write path - the loop caught up on its own.");
             }
         }
         finally
@@ -502,7 +502,7 @@
                 _log.Ok(
                     "The engine checkpointed itself",
                     string.Join(", ", snapshots),
-                    "No application code asked for it — the flush loop noticed the log had outgrown CheckpointWalSize.");
+                    "No application code asked for it - the flush loop noticed the log had outgrown CheckpointWalSize.");
             }
             else
             {
@@ -558,7 +558,7 @@
         {
             var before = _table?.Count ?? 0;
             await _db.FlushAsync();
-            _log.Add("Flushed, then abandoned the instance", "no DisposeAsync — the process simply stops");
+            _log.Add("Flushed, then abandoned the instance", "no DisposeAsync - the process simply stops");
 
             _generation++;
             _db = null;
@@ -766,7 +766,7 @@
             _generation++;
             _db = null;
             await OpenAsync("this should not be reached");
-            _log.Error("Open succeeded", "unexpected — corruption went undetected");
+            _log.Error("Open succeeded", "unexpected - corruption went undetected");
         }
         catch (CorruptDatabaseException ex)
         {

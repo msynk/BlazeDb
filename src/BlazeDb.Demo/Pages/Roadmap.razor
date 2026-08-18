@@ -1,6 +1,6 @@
 @page "/roadmap"
 
-<PageTitle>Roadmap — BlazeDb</PageTitle>
+<PageTitle>Roadmap - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Reference" IconName="map" Title="What ships, what is next, and what never will"
             Lead="BlazeDb is a memory-first engine with a deliberately small surface. This page is the honest inventory: everything it does, and the things it will not try to be.">
@@ -79,7 +79,7 @@
                         </tr>
                         <tr>
                             <td class="mono">Include / navigations</td>
-                            <td>—</td>
+                            <td>-</td>
                             <td class="small muted">not supported: rows are flat, relationships are key properties</td>
                         </tr>
                     </tbody>
@@ -91,7 +91,7 @@
             <Panel Title="SaveChanges is a memory operation" IconName="bolt">
                 <p class="small mb-0">
                     It returns as soon as the transaction commits. The log reaches storage on the
-                    flush interval, or immediately if you ask for it — the same durability model
+                    flush interval, or immediately if you ask for it - the same durability model
                     every other write in the engine gets.
                 </p>
             </Panel>
@@ -108,8 +108,8 @@
 
     <Panel Title="Where the translation stops" IconName="query" Class="mt-3">
         <p class="small mb-2">
-            The translator consumes the longest prefix of the operator chain that fits the plan —
-            filters, then ordering, then paging, in that order — and chooses an index from the
+            The translator consumes the longest prefix of the operator chain that fits the plan -
+            filters, then ordering, then paging, in that order - and chooses an index from the
             predicates and the sort. It stops as soon as the chain would change meaning:
             <span class="mono">Take(2).Where(...)</span> is not
             <span class="mono">Where(...).Take(2)</span>, so the filter is left behind. Everything
@@ -118,7 +118,7 @@
         <p class="small mb-0">
             In a relational provider that fallback is a disaster, because it means pulling rows over
             a wire and filtering client-side. Here the rows are already managed objects in the same
-            heap, so the worst case is a delegate over an in-memory sequence — which is what the
+            heap, so the worst case is a delegate over an in-memory sequence - which is what the
             fast path is too, minus the index.
         </p>
     </Panel>
@@ -172,7 +172,7 @@
                 <ul class="ticks">
                     <li>Reads never touch storage and never allocate a copy.</li>
                     <li>Durability is asynchronous, explicit when you need it to be.</li>
-                    <li>No reflection at runtime — a generator emits everything.</li>
+                    <li>No reflection at runtime - a generator emits everything.</li>
                     <li>One writer, because the browser gives you one thread.</li>
                     <li>Corrupt input fails loudly; unknown input is skipped quietly.</li>
                     <li>Every public type fits in your head.</li>
@@ -204,7 +204,7 @@
             "indexes", "Try the lookups live"),
 
         new("Composable query plans", "query", "BlazeDb.Querying",
-            "One index source, any number of residual predicates, ordering, paging and projection — the primitive the EF Core provider translates LINQ onto, usable directly too.",
+            "One index source, any number of residual predicates, ordering, paging and projection - the primitive the EF Core provider translates LINQ onto, usable directly too.",
             "queries", "Build a query"),
 
         new("Atomic transactions", "txn", "BlazeDb.Core",
@@ -256,7 +256,7 @@
             null, ""),
 
         new("Cross-tab read replicas", "refresh", "BlazeDb.Browser",
-            "Read-only tabs recover from storage and reload when the writer announces a checkpoint over a BroadcastChannel. Only the signal crosses tabs — the data always travels through storage, so a replica cannot observe an uncommitted state.",
+            "Read-only tabs recover from storage and reload when the writer announces a checkpoint over a BroadcastChannel. Only the signal crosses tabs - the data always travels through storage, so a replica cannot observe an uncommitted state.",
             null, ""),
 
         new("EF Core provider", "layers", "BlazeDb.EntityFrameworkCore",
@@ -279,7 +279,7 @@
             "Replication is an application concern with application-specific merge rules. The engine gives you a durable local store and stays out of the way."),
 
         new("Lazy loading from storage", "architecture",
-            "Everything is loaded on open. Partial loading would put I/O back on the read path and make every accessor async — the exact cost this engine exists to avoid."),
+            "Everything is loaded on open. Partial loading would put I/O back on the read path and make every accessor async - the exact cost this engine exists to avoid."),
 
         new("Full-text search", "features",
             "Tokenisation, stemming and ranking are a library, not a database feature. Rows are live objects, so a dedicated index over them composes cleanly from outside."),
@@ -306,7 +306,7 @@
         var context = new AppContext(new DbContextOptionsBuilder<AppContext>()
             .UseBlazeDb(db).Options);
 
-        // A hash-index lookup, then a residual delegate, then a take —
+        // A hash-index lookup, then a residual delegate, then a take -
         // no scan, no SQL, no round trip.
         var open = await context.Todos
             .Where(t => !t.Done && t.Title.Contains("wal"))

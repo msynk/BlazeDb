@@ -2,7 +2,7 @@
 @using System.Runtime.InteropServices
 @implements IAsyncDisposable
 
-<PageTitle>Benchmarks — BlazeDb</PageTitle>
+<PageTitle>Benchmarks - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Performance" IconName="gauge" Title="Measured here, in your browser, right now"
             Lead="These are not numbers from a README. Every figure below is produced by running the operation in this tab against a real database, on your machine, in the WebAssembly runtime you are using to read this page.">
@@ -117,7 +117,7 @@
         @if (IsDebug)
         {
             <text>
-                You are also looking at a <strong>Debug</strong> build with no AOT compilation —
+                You are also looking at a <strong>Debug</strong> build with no AOT compilation -
                 a published Release build is typically several times faster.
             </text>
         }
@@ -129,7 +129,7 @@
         <Panel Title="Reads are free" IconName="bolt" Sub="no I/O at all">
             <p class="small mb-2">
                 A point read is a <code>Dictionary</code> lookup on a live object graph. There is no
-                deserialization, no copy, no cache layer, no async state machine — which is why the
+                deserialization, no copy, no cache layer, no async state machine - which is why the
                 per-op figure lands in nanoseconds rather than microseconds.
             </p>
             <p class="small mb-0">
@@ -172,27 +172,27 @@
                     <tbody>
                         <tr>
                             <td>Encoded row</td>
-                            <td class="num mono strong">@(_space is null ? "—" : DemoSandbox.Bytes(_space.RowBytes))</td>
+                            <td class="num mono strong">@(_space is null ? "-" : DemoSandbox.Bytes(_space.RowBytes))</td>
                             <td class="small muted">average across the loaded table</td>
                         </tr>
                         <tr>
                             <td>WAL record per insert</td>
-                            <td class="num mono strong">@(_space is null ? "—" : DemoSandbox.Bytes(_space.WalBytesPerRow))</td>
+                            <td class="num mono strong">@(_space is null ? "-" : DemoSandbox.Bytes(_space.WalBytesPerRow))</td>
                             <td class="small muted">16-byte header, table name, key, row</td>
                         </tr>
                         <tr>
                             <td>Snapshot</td>
-                            <td class="num mono strong">@(_space is null ? "—" : DemoSandbox.Bytes(_space.SnapshotBytes))</td>
+                            <td class="num mono strong">@(_space is null ? "-" : DemoSandbox.Bytes(_space.SnapshotBytes))</td>
                             <td class="small muted">@(_space is null ? "" : $"{_space.Rows:N0} rows, checksummed")</td>
                         </tr>
                         <tr>
                             <td>Snapshot per row</td>
-                            <td class="num mono strong">@(_space is null ? "—" : DemoSandbox.Bytes(_space.SnapshotBytesPerRow))</td>
+                            <td class="num mono strong">@(_space is null ? "-" : DemoSandbox.Bytes(_space.SnapshotBytesPerRow))</td>
                             <td class="small muted">length prefix plus the encoded row</td>
                         </tr>
                         <tr>
                             <td>Checkpoint</td>
-                            <td class="num mono strong">@(_space is null ? "—" : DemoSandbox.Duration(_space.CheckpointMs))</td>
+                            <td class="num mono strong">@(_space is null ? "-" : DemoSandbox.Duration(_space.CheckpointMs))</td>
                             <td class="small muted">encode every row and write atomically</td>
                         </tr>
                     </tbody>
@@ -225,7 +225,7 @@
 </Section>
 
 <Section Title="How the suite is written" IconName="code"
-         Lead="No harness, no attributes, no build step — the benchmark code is ordinary application code, which is the point.">
+         Lead="No harness, no attributes, no build step - the benchmark code is ordinary application code, which is the point.">
     <div class="grid grid-2">
         <CodeBlock Title="The measurement loop" Code="@HarnessSnippet" />
         <CodeBlock Title="A representative case" Code="@CaseSnippet" />
@@ -358,7 +358,7 @@
 
         async Task Step(string group, string name, string note, int ops, Action<int> body)
         {
-            _currentName = $"{group} — {name}";
+            _currentName = $"{group} - {name}";
             _progress = done * 100 / steps;
             StateHasChanged();
             await Task.Yield();

@@ -8,7 +8,7 @@ namespace BlazeDb.EntityFrameworkCore.Query;
 /// Splits a LINQ query into the part the engine can answer and the part it cannot.
 ///
 /// The engine understands a source (a scan or an index lookup), residual filters, an ordering and
-/// paging — so the translator consumes the longest prefix of the operator chain that fits that
+/// paging - so the translator consumes the longest prefix of the operator chain that fits that
 /// shape, choosing an index where a predicate or an ordering allows one. Whatever is left, from a
 /// projection to a group-by, is handed back untouched and runs as LINQ to Objects over the rows
 /// the plan produced. Rows are live objects in memory, so that fallback costs nothing but the
@@ -218,7 +218,7 @@ internal sealed class RowsPlaceholderReplacer : ExpressionVisitor
 }
 
 /// <summary>
-/// Evaluates the closed-over parts of a query — a captured variable, a constant, a field of a
+/// Evaluates the closed-over parts of a query - a captured variable, a constant, a field of a
 /// closure. LINQ trees carry these as member accesses over a display class, and reading them
 /// directly avoids compiling an expression just to learn a value.
 /// </summary>

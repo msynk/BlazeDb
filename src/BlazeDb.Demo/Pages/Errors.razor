@@ -1,6 +1,6 @@
 @page "/errors"
 
-<PageTitle>Errors &amp; edge cases — BlazeDb</PageTitle>
+<PageTitle>Errors &amp; edge cases - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Behaviour under stress" IconName="alert" Title="Every way BlazeDb says no"
             Lead="A database earns trust by failing predictably. Each case below is executed for real against a throwaway database and reports the exception type and message it actually produced.">
@@ -82,7 +82,7 @@
             <CodeBlock ShowHeader="false" Code="@EmptySnippet" />
             <p class="small mt-2 mb-0">
                 A range with no matches, a lookup on an absent value and a query with an
-                impossible predicate all yield an empty sequence — never null.
+                impossible predicate all yield an empty sequence - never null.
             </p>
         </Panel>
     </div>
@@ -94,7 +94,7 @@
         <Panel Title="Open with a fallback" IconName="database" Sub="the one you must write">
             <CodeBlock ShowHeader="false" Code="@OpenPatternSnippet" />
             <p class="small mt-2 mb-0">
-                This is exactly what this site does — the badge in the sidebar reflects which branch
+                This is exactly what this site does - the badge in the sidebar reflects which branch
                 it took.
             </p>
         </Panel>
@@ -118,7 +118,7 @@
     <Callout Tone="warn" Title="One caveat worth internalising." Class="mt-3">
         Rows are live objects, not copies. Mutating a row you fetched changes the table immediately,
         before and regardless of any <code>Update</code> call, and a rollback cannot undo it. Clone
-        before editing if you need transactional semantics — the <a href="todos">CRUD page</a> does
+        before editing if you need transactional semantics - the <a href="todos">CRUD page</a> does
         exactly that.
     </Callout>
 </Section>
@@ -199,7 +199,7 @@
 
         new("two-sources", "Queries", "Two index sources on one query",
             "query.UseIndex(a, ...).UseIndex(b, ...)", nameof(InvalidOperationException),
-            "A query reads from exactly one source. Combining indexes is a deliberate non-feature — filter residually instead.",
+            "A query reads from exactly one source. Combining indexes is a deliberate non-feature - filter residually instead.",
             static p => p.TwoSourcesAsync()),
 
         new("mutate-scan", "Queries", "Inserting while enumerating a scan",
@@ -356,7 +356,7 @@
         await using var db = await DemoSandbox.OpenAsync();
         var table = db.GetTable(TodoEntry.Table);
 
-        // Same name, same selector, different object — the descriptor never saw it.
+        // Same name, same selector, different object - the descriptor never saw it.
         var lookalike = new HashIndexDefinition<TodoEntry, bool>("Done", static r => r.Done);
         var count = table.CountBy(lookalike, true);
 
@@ -593,7 +593,7 @@
         }
         catch (BlazeDbException ex)
         {
-            // Storage rejected the append — quota, permissions, a closed handle.
+            // Storage rejected the append - quota, permissions, a closed handle.
             // Buffered bytes were put back, so a later flush can still succeed.
             ShowUnsavedWarning(ex);
         }

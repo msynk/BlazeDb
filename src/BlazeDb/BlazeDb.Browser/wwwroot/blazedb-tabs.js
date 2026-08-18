@@ -1,6 +1,6 @@
 // BlazeDb cross-tab notification module.
 // The writer tab posts a message after each checkpoint; replica tabs listen and reload.
-// BroadcastChannel only carries the signal — the data itself always travels through storage,
+// BroadcastChannel only carries the signal - the data itself always travels through storage,
 // so a replica reads exactly what was made durable.
 
 const channels = new Map();

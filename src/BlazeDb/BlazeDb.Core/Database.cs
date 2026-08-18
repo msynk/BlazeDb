@@ -58,7 +58,7 @@ public sealed class Database : IAsyncDisposable
     /// <summary>
     /// Discards the in-memory state and rebuilds it from storage (snapshot plus WAL replay),
     /// picking up everything another tab has flushed. Intended for read-only replicas; the
-    /// writer's own memory is already the newest copy. Existing row references are not updated —
+    /// writer's own memory is already the newest copy. Existing row references are not updated -
     /// re-query after reloading.
     /// </summary>
     public async ValueTask ReloadAsync(CancellationToken cancellationToken = default)

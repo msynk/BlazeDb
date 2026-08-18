@@ -6,7 +6,7 @@ namespace BlazeDb.Benchmarks;
 
 /// <summary>
 /// Read-path comparison: BlazeDb in-memory tables vs SQLite (in-memory, prepared statements,
-/// native codegen). Native SQLite is a *favorable* proxy for sqlite-wasm solutions — in the
+/// native codegen). Native SQLite is a *favorable* proxy for sqlite-wasm solutions - in the
 /// browser those additionally pay JS interop, worker round-trips and wasm execution overhead,
 /// so real-world gaps are larger than measured here.
 /// </summary>

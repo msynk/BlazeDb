@@ -6,7 +6,7 @@ namespace BlazeDb.Browser;
 
 /// <summary>
 /// OPFS (Origin Private File System) storage backend for Blazor WebAssembly. Uses the async
-/// OPFS API from the main thread — good enough for BlazeDb's background group-commit flushes —
+/// OPFS API from the main thread - good enough for BlazeDb's background group-commit flushes -
 /// and the Web Locks API to guarantee a single writer tab per database.
 /// </summary>
 [SupportedOSPlatform("browser")]

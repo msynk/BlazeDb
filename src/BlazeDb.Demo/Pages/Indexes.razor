@@ -2,10 +2,10 @@
 @implements IAsyncDisposable
 @inject DemoDbService Db
 
-<PageTitle>Indexes — BlazeDb</PageTitle>
+<PageTitle>Indexes - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Engine" IconName="index" Title="Two index kinds, both maintained for you"
-            Lead="A hash index answers equality in constant time. An ordered index answers range and sort questions in logarithmic time. Every insert, update and delete keeps both in step — there is no reindex step and no stale index.">
+            Lead="A hash index answers equality in constant time. An ordered index answers range and sort questions in logarithmic time. Every insert, update and delete keeps both in step - there is no reindex step and no stale index.">
     <span class="chip on"><Icon Name="index" /> 3 hash</span>
     <span class="chip on"><Icon Name="sort" /> 2 ordered</span>
     <span class="chip"><Icon Name="database" /> @(_todos?.Count ?? 0) rows</span>
@@ -17,7 +17,7 @@
 }
 else
 {
-    <Section Title="Hash indexes — equality in O(1)" IconName="index"
+    <Section Title="Hash indexes - equality in O(1)" IconName="index"
              Lead="Lookup returns every row whose indexed value equals the key. CountBy answers the same question without materialising anything.">
         <div class="grid grid-sidebar">
             <Panel Title="Try a lookup" IconName="search">
@@ -25,9 +25,9 @@ else
                     <div class="field">
                         <label class="field-label" for="hash-index">Index</label>
                         <select id="hash-index" class="select" @bind="_hashIndex" @bind:after="RunHash">
-                            <option value="Done">Indexes.Done — bool</option>
-                            <option value="Category">Indexes.Category — string?</option>
-                            <option value="ByPriority">Indexes.ByPriority — Priority enum</option>
+                            <option value="Done">Indexes.Done - bool</option>
+                            <option value="Category">Indexes.Category - string?</option>
+                            <option value="ByPriority">Indexes.ByPriority - Priority enum</option>
                         </select>
                     </div>
                     <div class="field">
@@ -102,7 +102,7 @@ else
                 <Panel Title="Null keys are never indexed" IconName="alert">
                     <p class="small">
                         A row whose indexed property is <code>null</code> is left out of that index
-                        entirely. It is still in the table and still returned by <code>Scan</code> — it
+                        entirely. It is still in the table and still returned by <code>Scan</code> - it
                         simply cannot be found through the index.
                     </p>
                     <dl class="kv">
@@ -147,7 +147,7 @@ else
                             </table>
                         </div>
                         <p class="tiny muted mt-1 mb-0">
-                            Same answer (@_compareResult rows) — @_compareFactor.
+                            Same answer (@_compareResult rows) - @_compareFactor.
                         </p>
                     }
                 </Panel>
@@ -155,7 +155,7 @@ else
         </div>
     </Section>
 
-    <Section Title="Ordered indexes — ranges and sort order" IconName="sort"
+    <Section Title="Ordered indexes - ranges and sort order" IconName="sort"
              Lead="Range takes two inclusive bounds and walks the index in either direction. An unbounded end leaves the range open, and an implicit conversion means a bare value is accepted wherever a bound is expected.">
         <div class="grid grid-sidebar">
             <Panel Title="Compose a range" IconName="filter">
@@ -163,8 +163,8 @@ else
                     <div class="field">
                         <label class="field-label" for="ord-index">Index</label>
                         <select id="ord-index" class="select" @bind="_orderedIndex" @bind:after="RunOrdered">
-                            <option value="Effort">Indexes.Effort — int</option>
-                            <option value="CreatedAt">Indexes.CreatedAt — DateTime</option>
+                            <option value="Effort">Indexes.Effort - int</option>
+                            <option value="CreatedAt">Indexes.CreatedAt - DateTime</option>
                         </select>
                     </div>
                     <div class="field" style="flex:0 0 auto">
@@ -229,7 +229,7 @@ else
                     <StatTile Label="Rows in range" IconName="database" Tone="accent" Value="@_orderedRows.Count.ToString("N0")" />
                     <StatTile Label="Elapsed" IconName="clock" Value="@_orderedTime" />
                     <StatTile Label="Full traversal" IconName="sort" Value="@_orderByCount.ToString("N0")"
-                              Note="OrderBy(index) — every row" />
+                              Note="OrderBy(index) - every row" />
                 </div>
 
                 @if (_orderedRows.Count > 0)
@@ -334,16 +334,16 @@ else
                             <Icon Name="plus" /> Insert an open "engine" row
                         </button>
                         <button class="btn btn-sm btn-block" @onclick="SandboxFlipDone" disabled="@(_sandboxCount == 0)">
-                            <Icon Name="refresh" /> Update — flip Done on the first row
+                            <Icon Name="refresh" /> Update - flip Done on the first row
                         </button>
                         <button class="btn btn-sm btn-block" @onclick="SandboxRecategorise" disabled="@(_sandboxCount == 0)">
-                            <Icon Name="tag" /> Update — move a row to "docs"
+                            <Icon Name="tag" /> Update - move a row to "docs"
                         </button>
                         <button class="btn btn-sm btn-block" @onclick="SandboxPromote" disabled="@(_sandboxCount == 0)">
-                            <Icon Name="bolt" /> Update — raise priority to Critical
+                            <Icon Name="bolt" /> Update - raise priority to Critical
                         </button>
                         <button class="btn btn-sm btn-block" @onclick="SandboxSetNull" disabled="@(_sandboxCount == 0)">
-                            <Icon Name="close" /> Update — set Category to null
+                            <Icon Name="close" /> Update - set Category to null
                         </button>
                         <button class="btn btn-sm btn-block btn-danger" @onclick="SandboxDelete" disabled="@(_sandboxCount == 0)">
                             <Icon Name="trash" /> Delete the first row
@@ -372,7 +372,7 @@ else
     private List<TodoEntry> _hashRows = [];
     private int _hashCount;
     private string _hashCode = "";
-    private string _hashTime = "—";
+    private string _hashTime = "-";
     private string _hashEmptyNote = "No rows for that key.";
     private int _categorySum;
     private int _nullLookupCount;
@@ -395,7 +395,7 @@ else
     private DateTime _dateTo = DateTime.UtcNow;
     private List<TodoEntry> _orderedRows = [];
     private string _orderedCode = "";
-    private string _orderedTime = "—";
+    private string _orderedTime = "-";
     private int _orderByCount;
     private string? _invertedNote;
 
@@ -459,7 +459,7 @@ else
                     $"todos.Lookup(TodoEntry.Indexes.Category, {Literal(key)})\n" +
                     $"todos.CountBy(TodoEntry.Indexes.Category, {Literal(key)})";
                 _hashEmptyNote = key is null
-                    ? "Zero rows — null values are never added to an index."
+                    ? "Zero rows - null values are never added to an index."
                     : "No rows for that key; a missing key is not an error.";
                 break;
 
@@ -612,22 +612,22 @@ else
 
     private void SandboxFlipDone() => MutateFirst(
         row => row.Done = !row.Done,
-        "Update — Done flipped",
+        "Update - Done flipped",
         "The row moved from one Done bucket to the other. Same key, same row store slot.");
 
     private void SandboxRecategorise() => MutateFirst(
         row => row.Category = row.Category == "docs" ? "engine" : "docs",
-        "Update — Category changed",
+        "Update - Category changed",
         "Removed from the old Category bucket and added to the new one.");
 
     private void SandboxPromote() => MutateFirst(
         row => row.Priority = row.Priority == Priority.Critical ? Priority.Low : Priority.Critical,
-        "Update — Priority changed",
+        "Update - Priority changed",
         "ByPriority is a hash index over an enum, so this is a bucket move too.");
 
     private void SandboxSetNull() => MutateFirst(
         row => row.Category = null,
-        "Update — Category set to null",
+        "Update - Category set to null",
         "The row left the Category index completely. Scan still returns it.");
 
     private void MutateFirst(Action<TodoEntry> mutate, string title, string note)

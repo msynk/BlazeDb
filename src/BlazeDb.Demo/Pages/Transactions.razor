@@ -1,10 +1,10 @@
 @page "/transactions"
 @implements IAsyncDisposable
 
-<PageTitle>Transactions — BlazeDb</PageTitle>
+<PageTitle>Transactions - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Engine" IconName="txn" Title="One writer, one ambient batch"
-            Lead="A transaction makes a group of writes atomic in the log. Writes still land in memory immediately, so reads inside the batch see them — but nothing is durable until commit, and a rollback reverts every change through an undo log.">
+            Lead="A transaction makes a group of writes atomic in the log. Writes still land in memory immediately, so reads inside the batch see them - but nothing is durable until commit, and a rollback reverts every change through an undo log.">
     <span class="chip"><Icon Name="lock" /> Single writer</span>
     <span class="chip"><Icon Name="layers" /> Ambient enrolment</span>
     <span class="chip"><Icon Name="close" /> No nesting, no savepoints</span>
@@ -85,7 +85,7 @@
                                 <div class="tiny muted mono">
                                     storage:
                                     @(_storage.FileNames.Count == 0
-                                        ? "nothing written yet — commits are buffered until a flush"
+                                        ? "nothing written yet - commits are buffered until a flush"
                                         : string.Join(" · ", _storage.FileNames.OrderBy(f => f)))
                                 </div>
                             </div>
@@ -124,7 +124,7 @@
                         </thead>
                         <tbody>
                             <tr>
-                                <td class="mono">autocommit — one record each</td>
+                                <td class="mono">autocommit - one record each</td>
                                 <td class="num mono">@_autoTotal</td>
                                 <td class="num mono">@_autoPer</td>
                             </tr>
@@ -143,7 +143,7 @@
         <div class="flex-col gap-lg">
             <CodeBlock Title="Bulk loading" Code="@BatchSnippet" />
             <Callout Tone="info" Title="Both paths are durable.">
-                Autocommit is not “unsafe” — each write still becomes a log record. A transaction
+                Autocommit is not “unsafe” - each write still becomes a log record. A transaction
                 simply amortises the record framing and gives you all-or-nothing recovery.
             </Callout>
         </div>
@@ -156,7 +156,7 @@
         <Panel Title="Committed batch" IconName="check">
             <p class="small">
                 Three rows inserted in a transaction, committed, flushed, then the database instance is
-                abandoned without disposing it — the same thing a closed tab does.
+                abandoned without disposing it - the same thing a closed tab does.
             </p>
             <button class="btn btn-sm btn-block" disabled="@_crashRunning" @onclick="() => RunCrashAsync(true)">
                 <Icon Name="play" /> Commit, crash, reopen
@@ -188,7 +188,7 @@
         <Panel Title="Ambient by design" IconName="layers">
             <p class="small">
                 <code>BeginTransaction</code> does not hand you a scoped writer. While a transaction is
-                active, <em>every</em> write against <em>any</em> table on that database is enrolled —
+                active, <em>every</em> write against <em>any</em> table on that database is enrolled -
                 including writes made deep inside code that never saw the transaction object.
             </p>
             <CodeBlock ShowHeader="false" Code="@AmbientSnippet" />
@@ -239,7 +239,7 @@
 
     private static readonly Scenario[] Scenarios =
     [
-        new("commit", "Commit — all or nothing", "check",
+        new("commit", "Commit - all or nothing", "check",
             """
             using (var txn = db.BeginTransaction())
             {
@@ -254,7 +254,7 @@
             "ok",
             static page => page.ScenarioCommit()),
 
-        new("rollback", "Rollback — revert insert, update and delete", "refresh",
+        new("rollback", "Rollback - revert insert, update and delete", "refresh",
             """
             using (var txn = db.BeginTransaction())
             {
@@ -285,7 +285,7 @@
             using var txn = db.BeginTransaction();
             todos.Insert(row);
 
-            todos.Contains(row.Id);   // true — already in memory
+            todos.Contains(row.Id);   // true - already in memory
             todos.Count;              // includes the new row
 
             txn.Rollback();
@@ -313,7 +313,7 @@
                 txn.Rollback();            // 'good' is reverted too
             }
             """,
-            "A throwing operation does not auto-rollback — you decide whether to continue or revert.",
+            "A throwing operation does not auto-rollback - you decide whether to continue or revert.",
             "warn",
             static page => page.ScenarioFailure()),
 
@@ -411,7 +411,7 @@
             {
                 table.Insert(Row($"batched row {i}", 100 + i));
             }
-            _log.Add("Three inserts recorded", "todos.Insert(row) × 3", $"Count is already {table.Count} — memory is updated first.");
+            _log.Add("Three inserts recorded", "todos.Insert(row) × 3", $"Count is already {table.Count} - memory is updated first.");
             txn.Commit();
             _log.Ok("Commit()", "txn.Commit()", "One atomic log entry covering all three writes.");
         }
@@ -547,7 +547,7 @@
                 _log.Error(
                     "Second insert throws",
                     $"DuplicateKeyException(table: \"{ex.TableName}\", key: {ex.Key})",
-                    "The transaction is still open and still valid — nothing was auto-rolled-back.");
+                    "The transaction is still open and still valid - nothing was auto-rolled-back.");
             }
 
             _log.Add("The good row is still visible", $"todos.Count → {table.Count}");
@@ -601,7 +601,7 @@
         try
         {
             await _db.CheckpointAsync();
-            _log.Add("Checkpoint completed", "await db.CheckpointAsync()", "Unexpected — a snapshot was taken mid-batch.");
+            _log.Add("Checkpoint completed", "await db.CheckpointAsync()", "Unexpected - a snapshot was taken mid-batch.");
         }
         catch (InvalidOperationException ex)
         {
@@ -666,7 +666,7 @@
 
             _batchResult =
                 $"{rows:N0} rows each. Write-ahead log: {DemoSandbox.Bytes(walA)} autocommit versus " +
-                $"{DemoSandbox.Bytes(walB)} batched — the batch amortises record framing as well as commit work.";
+                $"{DemoSandbox.Bytes(walB)} batched - the batch amortises record framing as well as commit work.";
         }
         finally
         {
@@ -709,7 +709,7 @@
             var inMemory = table.Count;
             await db.FlushAsync();
 
-            // The instance is abandoned on purpose — no DisposeAsync, like a closed tab.
+            // The instance is abandoned on purpose - no DisposeAsync, like a closed tab.
             await using var reopened = await DemoSandbox.OpenAsync(storage, TimeSpan.FromHours(1), long.MaxValue);
             var recovered = reopened.GetTable(TodoEntry.Table).Count;
 

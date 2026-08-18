@@ -6,7 +6,7 @@ namespace BlazeDb.EntityFrameworkCore.Query;
 /// <summary>
 /// Decides which index, if any, a query should read from.
 ///
-/// The rules are deliberately shallow — there are no statistics to consult and every row is
+/// The rules are deliberately shallow - there are no statistics to consult and every row is
 /// already in memory, so the win is asymptotic rather than marginal: an equality lookup or a range
 /// scan instead of touching every row. Preference runs compound equality first (most selective),
 /// then single-property equality, then a range, and finally an ordering that an ordered index can

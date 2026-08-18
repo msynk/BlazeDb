@@ -7,7 +7,7 @@ namespace BlazeDb.Tests;
 /// <summary>
 /// Read-replica semantics. In the browser these instances live in different tabs and share the
 /// origin's storage; here two Database instances share one IStorage, which exercises the same
-/// paths — the tabs only ever communicate through storage anyway.
+/// paths - the tabs only ever communicate through storage anyway.
 /// </summary>
 public class ReplicaTests
 {
