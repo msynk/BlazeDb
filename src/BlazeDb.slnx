@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="BlazeDb/BlazeDb.Browser/BlazeDb.Browser.csproj" />
+    <Project Path="BlazeDb/BlazeDb.Core/BlazeDb.Core.csproj" />
+    <Project Path="BlazeDb/BlazeDb.EntityFrameworkCore/BlazeDb.EntityFrameworkCore.csproj" />
+    <Project Path="BlazeDb/BlazeDb.SourceGen/BlazeDb.SourceGen.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="BlazeDb.Benchmarks/BlazeDb.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/demos/">
+    <Project Path="BlazeDb.Demo/BlazeDb.Demo.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="BlazeDb.Tests/BlazeDb.Tests.csproj" />
+    <Project Path="BlazeDb.EntityFrameworkCore.Tests/BlazeDb.EntityFrameworkCore.Tests.csproj" />
+  </Folder>
+</Solution>

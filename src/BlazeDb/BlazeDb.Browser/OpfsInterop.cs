@@ -1,0 +1,48 @@
+using System.Runtime.InteropServices.JavaScript;
+using System.Runtime.Versioning;
+
+namespace BlazeDb.Browser;
+
+/// <summary>Generated bindings to the blazedb-opfs.js ES module.</summary>
+[SupportedOSPlatform("browser")]
+internal static partial class OpfsInterop
+{
+    private const string ModuleName = BrowserModules.Opfs;
+
+    public static Task EnsureModuleAsync(string? moduleUrl) => BrowserModules.EnsureAsync(ModuleName, moduleUrl);
+
+    [JSImport("acquireLock", ModuleName)]
+    public static partial Task<bool> AcquireLock(string lockName);
+
+    [JSImport("releaseLock", ModuleName)]
+    public static partial void ReleaseLock(string lockName);
+
+    [JSImport("openDatabaseDirectory", ModuleName)]
+    public static partial Task<JSObject> OpenDatabaseDirectory(string databaseName);
+
+    [JSImport("openExistingDatabaseDirectory", ModuleName)]
+    public static partial Task<JSObject?> OpenExistingDatabaseDirectory(string databaseName);
+
+    [JSImport("readFile", ModuleName)]
+    public static partial Task<JSObject?> ReadFile(JSObject directory, string name);
+
+    [JSImport("copyBytes", ModuleName)]
+    public static partial void CopyBytes(
+        JSObject source,
+        [JSMarshalAs<JSType.MemoryView>] Span<byte> destination);
+
+    [JSImport("writeAtomic", ModuleName)]
+    public static partial Task WriteAtomic(JSObject directory, string name, byte[] bytes);
+
+    [JSImport("appendFile", ModuleName)]
+    public static partial Task AppendFile(JSObject directory, string name, byte[] bytes);
+
+    [JSImport("deleteFile", ModuleName)]
+    public static partial Task DeleteFile(JSObject directory, string name);
+
+    [JSImport("storageEstimate", ModuleName)]
+    public static partial Task<JSObject?> StorageEstimate();
+
+    [JSImport("requestPersistence", ModuleName)]
+    public static partial Task<bool> RequestPersistence();
+}

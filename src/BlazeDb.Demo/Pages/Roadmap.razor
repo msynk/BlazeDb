@@ -1,0 +1,325 @@
+@page "/roadmap"
+
+<PageTitle>Roadmap — BlazeDb</PageTitle>
+
+<PageHeader Eyebrow="Reference" IconName="map" Title="What ships, what is next, and what never will"
+            Lead="BlazeDb is a memory-first engine with a deliberately small surface. This page is the honest inventory: everything it does, and the things it will not try to be.">
+    <span class="chip ok"><Icon Name="check" /> @Shipped.Length shipped</span>
+    <span class="chip info"><Icon Name="clock" /> nothing outstanding</span>
+    <span class="chip"><Icon Name="close" /> @NonGoals.Length explicit non-goals</span>
+</PageHeader>
+
+<Section Title="Shipped" IconName="check"
+         Lead="Where an item has a page on this site, the link drives it against a real database rather than describing it. The rest are covered by the test suite.">
+    <div class="grid grid-2">
+        @foreach (var item in Shipped)
+        {
+            <Panel Title="@item.Title" IconName="@item.Icon" Sub="@item.Sub">
+                <p class="small mb-2">@item.Body</p>
+                @if (item.Proof is not null)
+                {
+                    <a class="btn btn-sm" href="@item.Proof">
+                        <Icon Name="arrow-right" /> @item.ProofLabel
+                    </a>
+                }
+            </Panel>
+        }
+    </div>
+</Section>
+
+<Section Title="The EF Core provider" IconName="layers"
+         Lead="A milestone rather than a rewrite: the engine's query plan was designed as the provider's target from the start, so the provider is a translation layer and nothing more.">
+    <div class="grid grid-sidebar">
+        <Panel Title="How EF Core concepts land on the engine" IconName="schema" Flush="true">
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr><th>EF Core</th><th>BlazeDb</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="mono">DbContext</td>
+                            <td class="mono">Database</td>
+                            <td class="small muted">one instance, one write lock, tables from the model</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">DbSet&lt;T&gt;</td>
+                            <td class="mono">Table&lt;TKey, TRow&gt;</td>
+                            <td class="small muted">entity type to descriptor, generated or model-driven</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">SaveChanges</td>
+                            <td class="mono">BeginTransaction / Commit</td>
+                            <td class="small muted">change-tracker entries become one atomic batch</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">Find(key)</td>
+                            <td class="mono">table.Get(key)</td>
+                            <td class="small muted">already O(1) with no materialisation step</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">Where(x =&gt; x.Done)</td>
+                            <td class="mono">UseIndex(hash index)</td>
+                            <td class="small muted">equality on an indexed member becomes a lookup</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">Where(x =&gt; x.At &gt;= a)</td>
+                            <td class="mono">UseIndex(ordered index)</td>
+                            <td class="small muted">comparisons become a range scan</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">OrderBy / Skip / Take</td>
+                            <td class="mono">OrderBy / Skip / Take</td>
+                            <td class="small muted">already a 1:1 mapping on the plan</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">Select / GroupBy / aggregates</td>
+                            <td>LINQ to Objects</td>
+                            <td class="small muted">runs over the rows the plan returned, at no extra cost</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">Include / navigations</td>
+                            <td>—</td>
+                            <td class="small muted">not supported: rows are flat, relationships are key properties</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </Panel>
+
+        <div class="flex-col gap-lg">
+            <Panel Title="SaveChanges is a memory operation" IconName="bolt">
+                <p class="small mb-0">
+                    It returns as soon as the transaction commits. The log reaches storage on the
+                    flush interval, or immediately if you ask for it — the same durability model
+                    every other write in the engine gets.
+                </p>
+            </Panel>
+            <Panel Title="What it looks like" IconName="code">
+                <CodeBlock ShowHeader="false" Code="@EfSnippet" />
+            </Panel>
+            <Callout Tone="warn" Title="A query returns the row, not a copy:">
+                mutating a tracked entity changes the database in memory straight away. SaveChanges
+                is what commits it as one transaction and one log record, and what moves the index
+                entries onto the new values.
+            </Callout>
+        </div>
+    </div>
+
+    <Panel Title="Where the translation stops" IconName="query" Class="mt-3">
+        <p class="small mb-2">
+            The translator consumes the longest prefix of the operator chain that fits the plan —
+            filters, then ordering, then paging, in that order — and chooses an index from the
+            predicates and the sort. It stops as soon as the chain would change meaning:
+            <span class="mono">Take(2).Where(...)</span> is not
+            <span class="mono">Where(...).Take(2)</span>, so the filter is left behind. Everything
+            left over runs as LINQ to Objects over the rows the plan produced.
+        </p>
+        <p class="small mb-0">
+            In a relational provider that fallback is a disaster, because it means pulling rows over
+            a wire and filtering client-side. Here the rows are already managed objects in the same
+            heap, so the worst case is a delegate over an in-memory sequence — which is what the
+            fast path is too, minus the index.
+        </p>
+    </Panel>
+</Section>
+
+<Section Title="Planned" IconName="clock"
+         Lead="Nothing. Every item this roadmap has ever listed is now in the shipped table above, and the list below is what the engine will not grow into instead.">
+    <Callout Tone="ok" Title="The roadmap is empty on purpose:">
+        the surface was scoped up front and is now complete. New work should have to argue for
+        itself against the non-goals rather than inherit a place in a queue.
+    </Callout>
+</Section>
+
+<Section Title="Deliberately not doing this" IconName="close"
+         Lead="A client-side engine earns its speed by refusing work. These omissions are the reason the numbers on the benchmarks page look the way they do.">
+    <div class="grid grid-2">
+        @foreach (var item in NonGoals)
+        {
+            <Panel Title="@item.Title" IconName="close" Sub="@item.Area">
+                <p class="small mb-0">@item.Body</p>
+            </Panel>
+        }
+    </div>
+</Section>
+
+<Section Title="The repository" IconName="layers">
+    <div class="grid grid-sidebar">
+        <Panel Title="Projects" IconName="file" Flush="true">
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Project</th><th>Purpose</th><th class="num">State</th></tr></thead>
+                    <tbody>
+                        @foreach (var project in Projects)
+                        {
+                            <tr>
+                                <td class="mono small">@project.Name</td>
+                                <td class="small">@project.Purpose</td>
+                                <td class="num"><span class="badge @(project.State == "scaffold" ? "warn" : "ok")">@project.State</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </Panel>
+
+        <div class="flex-col gap-lg">
+            <Panel Title="Build and test" IconName="cpu">
+                <CodeBlock ShowHeader="false" Language="bash" Code="@BuildSnippet" />
+            </Panel>
+            <Panel Title="Design rules" IconName="shield">
+                <ul class="ticks">
+                    <li>Reads never touch storage and never allocate a copy.</li>
+                    <li>Durability is asynchronous, explicit when you need it to be.</li>
+                    <li>No reflection at runtime — a generator emits everything.</li>
+                    <li>One writer, because the browser gives you one thread.</li>
+                    <li>Corrupt input fails loudly; unknown input is skipped quietly.</li>
+                    <li>Every public type fits in your head.</li>
+                </ul>
+            </Panel>
+        </div>
+    </div>
+</Section>
+
+@code {
+    private sealed record Feature(string Title, string Icon, string Sub, string Body, string? Proof, string ProofLabel);
+
+    private sealed record Item(string Title, string Area, string Body, string Effort = "");
+
+    private sealed record Project(string Name, string Purpose, string State);
+
+    private static readonly Feature[] Shipped =
+    [
+        new("Tables over live objects", "database", "BlazeDb.Core",
+            "A primary-key hash index over the row objects themselves, with Insert, Update, Upsert, Delete, Get, TryGet, Contains and Scan. Reads are synchronous method calls with no I/O and no deserialization.",
+            "todos", "See it driving a real app"),
+
+        new("Source-generated schema", "schema", "BlazeDb.SourceGen",
+            "An incremental Roslyn generator turns [Table], [Key], [Index], [OrderedIndex], [Field] and [Ignore] into a descriptor with binary serializers, a key extractor and index definitions. No runtime reflection, so trimming and AOT are safe.",
+            "schema", "Inspect the generated descriptor"),
+
+        new("Hash and ordered indexes", "index", "BlazeDb.Core",
+            "Equality lookups in O(1) and range scans in O(log n) with inclusive or open bounds, maintained automatically on every mutation including rollback.",
+            "indexes", "Try the lookups live"),
+
+        new("Composable query plans", "query", "BlazeDb.Querying",
+            "One index source, any number of residual predicates, ordering, paging and projection — the primitive the EF Core provider translates LINQ onto, usable directly too.",
+            "queries", "Build a query"),
+
+        new("Atomic transactions", "txn", "BlazeDb.Core",
+            "An ambient single-writer transaction with commit, rollback and reverse-order undo of both rows and index entries. A committed batch is one log record.",
+            "transactions", "Watch commit and rollback"),
+
+        new("Write-ahead log and snapshots", "shield", "BlazeDb.Wal",
+            "Group-committed WAL records with per-record CRC32, atomic manifest updates, snapshot compaction, torn-tail truncation and replay on open.",
+            "durability", "Crash it on purpose"),
+
+        new("Pluggable storage", "disk", "BlazeDb.Storage",
+            "A four-method contract with in-memory and file backends in the core, and an OPFS backend plus Web Locks single-writer election for the browser.",
+            "storage", "Trace the engine's I/O"),
+
+        new("Compact binary format", "binary", "BlazeDb.Serialization",
+            "Tagged, length-delimited encoding with varints, absent-means-null fields and unknown-field skipping, so old readers survive new writers.",
+            "serialization", "Read the actual bytes"),
+
+        new("Predictable failure", "alert", "BlazeDb.Core",
+            "A small exception hierarchy under BlazeDbException, with checksum validation on everything persisted and clear rules about what throws versus what returns false.",
+            "errors", "Trigger every one"),
+
+        new("Browser integration", "cpu", "BlazeDb.Browser",
+            "OPFS access through a [JSImport] ES module with synchronous access handles, plus Web Locks so a second tab cannot corrupt the first one's files.",
+            "storage", "See the browser notes"),
+
+        new("Unique constraints", "shield", "BlazeDb.Core",
+            "A uniqueness flag on hash and ordered indexes, checked before anything is mutated so a rejected write leaves the table and its indexes untouched. Null values are exempt, as everywhere else in the indexing layer.",
+            null, ""),
+
+        new("Compound indexes", "index", "BlazeDb.Core",
+            "[CompoundIndex] and [CompoundOrderedIndex] build an index keyed by a value tuple, so a filter on several members resolves to one lookup. Ordered ones sort lexicographically, which keeps a leading-key prefix a single contiguous scan.",
+            null, ""),
+
+        new("Streaming query results", "query", "BlazeDb.Querying",
+            "ExecuteAsync hands control back to the browser every N rows, so scanning a large table cannot freeze rendering on WebAssembly's single thread. Filters, ordering and paging apply exactly as in the synchronous path.",
+            null, ""),
+
+        new("Encryption at rest", "lock", "BlazeDb.Storage",
+            "An IStorage decorator that seals every write into an AES-GCM frame, keeping appends genuine appends. The file name is bound in as associated data, and a torn trailing frame is ignored while a tampered one is reported as corruption.",
+            null, ""),
+
+        new("Quota-aware persistence", "disk", "BlazeDb.Core",
+            "The engine consults navigator.storage estimates before flushing, compacts when space runs short, and refuses deliberately rather than discovering the limit as a failed append. Data stays intact in memory and the flush can be retried.",
+            null, ""),
+
+        new("IndexedDB fallback", "database", "BlazeDb.Browser",
+            "A second browser backend for contexts without OPFS, such as Firefox private windows. Same four-method contract, same single-writer lock, so nothing above it changes.",
+            null, ""),
+
+        new("Cross-tab read replicas", "refresh", "BlazeDb.Browser",
+            "Read-only tabs recover from storage and reload when the writer announces a checkpoint over a BroadcastChannel. Only the signal crosses tabs — the data always travels through storage, so a replica cannot observe an uncommitted state.",
+            null, ""),
+
+        new("EF Core provider", "layers", "BlazeDb.EntityFrameworkCore",
+            "UseBlazeDb over an open database, entity types mapped to the generated descriptors, SaveChanges as one transaction, and LINQ translated onto the query plan with index selection. Queries hand back the live row, so tracking needs no materialization step.",
+            null, ""),
+    ];
+
+    private static readonly Item[] NonGoals =
+    [
+        new("SQL", "query language",
+            "There is no parser, planner or optimiser, and there will not be. Typed primitives compose better in C#, cost nothing at runtime and cannot produce a syntax error at three in the morning."),
+
+        new("Multi-writer concurrency", "concurrency",
+            "The browser gives one thread per tab, so the engine assumes one logical writer and elects it with a Web Lock. Locking pages, MVCC and deadlock detection would all be overhead paid for nothing."),
+
+        new("Server-side scale", "positioning",
+            "The whole dataset lives in memory by design. That is the right trade for a client-side application working with its own user's data, and the wrong one for a shared multi-tenant database."),
+
+        new("Sync and conflict resolution", "distribution",
+            "Replication is an application concern with application-specific merge rules. The engine gives you a durable local store and stays out of the way."),
+
+        new("Lazy loading from storage", "architecture",
+            "Everything is loaded on open. Partial loading would put I/O back on the read path and make every accessor async — the exact cost this engine exists to avoid."),
+
+        new("Full-text search", "features",
+            "Tokenisation, stemming and ranking are a library, not a database feature. Rows are live objects, so a dedicated index over them composes cleanly from outside."),
+    ];
+
+    private static readonly Project[] Projects =
+    [
+        new("BlazeDb.Core", "The engine: tables, indexes, transactions, WAL and snapshots, storage abstraction. No browser dependency.", "shipped"),
+        new("BlazeDb.SourceGen", "Incremental generator for serializers, key extractors and index definitions.", "shipped"),
+        new("BlazeDb.Browser", "OPFS and IndexedDB backends, Web Locks election, WebCrypto, cross-tab sync.", "shipped"),
+        new("BlazeDb.EntityFrameworkCore", "The non-relational EF Core provider.", "shipped"),
+        new("BlazeDb.Benchmarks", "BenchmarkDotNet suite, including comparisons against SQLite.", "shipped"),
+        new("BlazeDb.Tests", "Engine tests including crash recovery and torn writes.", "shipped"),
+        new("BlazeDb.EntityFrameworkCore.Tests", "Provider tests: saves, tracking, and the plans the translator produces.", "shipped"),
+        new("BlazeDb.Demo", "This site.", "shipped"),
+    ];
+
+    private const string EfSnippet = """
+        public sealed class AppContext(DbContextOptions<AppContext> options) : DbContext(options)
+        {
+            public DbSet<TodoItem> Todos => Set<TodoItem>();
+        }
+
+        var context = new AppContext(new DbContextOptionsBuilder<AppContext>()
+            .UseBlazeDb(db).Options);
+
+        // A hash-index lookup, then a residual delegate, then a take —
+        // no scan, no SQL, no round trip.
+        var open = await context.Todos
+            .Where(t => !t.Done && t.Title.Contains("wal"))
+            .OrderByDescending(t => t.CreatedAt)
+            .Take(20)
+            .ToListAsync();
+        """;
+
+    private const string BuildSnippet = """
+        dotnet build src/BlazeDb.slnx
+        dotnet test src/BlazeDb.slnx
+        dotnet run --project src/BlazeDb.Demo
+        dotnet run --project src/BlazeDb.Benchmarks -c Release -- --filter *
+        """;
+
+}

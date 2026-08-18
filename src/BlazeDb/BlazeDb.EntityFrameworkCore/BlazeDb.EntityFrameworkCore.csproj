@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazeDb.Core\BlazeDb.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The translator and the plan are the provider's interesting parts and are tested directly:
+         from the outside an index lookup and a scan are indistinguishable. -->
+    <InternalsVisibleTo Include="BlazeDb.EntityFrameworkCore.Tests" />
+  </ItemGroup>
+
+</Project>

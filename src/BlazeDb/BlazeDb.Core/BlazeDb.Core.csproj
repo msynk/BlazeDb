@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The EF Core provider works with tables whose key and row types it only knows at runtime,
+         so it reaches for the boxed index accessors rather than the generic public API. -->
+    <InternalsVisibleTo Include="BlazeDb.EntityFrameworkCore" />
+  </ItemGroup>
+
+</Project>
