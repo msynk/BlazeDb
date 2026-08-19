@@ -16,6 +16,16 @@ internal interface IBlazeDbTableBinding
 
     string TableName { get; }
 
+    /// <summary>The CLR type of the primary key.</summary>
+    Type KeyType { get; }
+
+    /// <summary>
+    /// The entity property that holds the primary key, when EF's model names exactly one - which
+    /// lets the translator send <c>row.Id == value</c> to the key dictionary. Null when the model's
+    /// key does not map onto a single property.
+    /// </summary>
+    string? KeyMember { get; }
+
     IReadOnlyList<BlazeDbIndex> Indexes { get; }
 
     /// <summary>Creates an empty plan typed to this table's row type.</summary>
@@ -54,9 +64,10 @@ internal sealed class BlazeDbTableBinding<TKey, TRow> : IBlazeDbTableBinding
 {
     private readonly Table<TKey, TRow> _table;
 
-    public BlazeDbTableBinding(Table<TKey, TRow> table)
+    public BlazeDbTableBinding(Table<TKey, TRow> table, string? keyMember)
     {
         _table = table;
+        KeyMember = keyMember;
         Indexes = table.Descriptor.Indexes
             .Select(i => new BlazeDbIndex(
                 i.Name,
@@ -70,6 +81,10 @@ internal sealed class BlazeDbTableBinding<TKey, TRow> : IBlazeDbTableBinding
     public Type RowType => typeof(TRow);
 
     public string TableName => _table.Name;
+
+    public Type KeyType => typeof(TKey);
+
+    public string? KeyMember { get; }
 
     public IReadOnlyList<BlazeDbIndex> Indexes { get; }
 
@@ -145,14 +160,34 @@ internal static class BlazeDbTableResolver
         memberType.GetGenericArguments()[1] == clrType;
 
     /// <summary>Creates the strongly-typed binding for a descriptor whose type arguments are only known at runtime.</summary>
-    public static IBlazeDbTableBinding CreateBinding(Database database, TableDescriptor descriptor)
+    public static IBlazeDbTableBinding CreateBinding(Database database, IEntityType entityType)
     {
+        var descriptor = Resolve(entityType);
         var arguments = descriptor.GetType().GetGenericArguments();
         var bindingType = typeof(BlazeDbTableBinding<,>).MakeGenericType(arguments);
         var table = GetTableMethod
             .MakeGenericMethod(arguments)
             .Invoke(database, [descriptor])!;
-        return (IBlazeDbTableBinding)Activator.CreateInstance(bindingType, table)!;
+        return (IBlazeDbTableBinding)Activator.CreateInstance(bindingType, table, FindKeyMember(entityType, descriptor, arguments[0]))!;
+    }
+
+    /// <summary>
+    /// The property a <c>row.X == value</c> may be sent to the primary-key dictionary for. It has to be
+    /// the property the engine's key selector reads: the descriptor names it when it was generated,
+    /// and EF's own primary key is trusted only when it is that same property (or, for a hand-written
+    /// descriptor that does not say, when it is a single property of the key's type). Anything else
+    /// - an EF <c>HasKey</c> on a different property, a composite key - leaves such predicates as
+    /// filters, which is slower but never answers a different question.
+    /// </summary>
+    private static string? FindKeyMember(IEntityType entityType, TableDescriptor descriptor, Type keyType)
+    {
+        var properties = entityType.FindPrimaryKey()?.Properties;
+        if (properties is not [{ } property] || property.ClrType != keyType)
+        {
+            return null;
+        }
+        var declared = ((dynamic)descriptor).KeyMember as string;
+        return declared is null || declared == property.Name ? property.Name : null;
     }
 
     private static readonly MethodInfo GetTableMethod =

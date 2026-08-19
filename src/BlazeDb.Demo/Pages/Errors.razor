@@ -74,8 +74,9 @@
         <Panel Title="Null index keys" IconName="key">
             <CodeBlock ShowHeader="false" Code="@NullIndexSnippet" />
             <p class="small mt-2 mb-0">
-                Nullable indexed properties are indexed under their null value, so
-                "uncategorised" is an O(1) lookup rather than a scan.
+                Rows whose indexed value is null are simply not in that index: a lookup with a null
+                key is empty, never an error, and unique indexes ignore nulls. Finding "uncategorised"
+                rows is therefore a scan (or a residual filter on another index).
             </p>
         </Panel>
         <Panel Title="Empty results" IconName="query">
@@ -94,16 +95,18 @@
         <Panel Title="Open with a fallback" IconName="database" Sub="the one you must write">
             <CodeBlock ShowHeader="false" Code="@OpenPatternSnippet" />
             <p class="small mt-2 mb-0">
-                This is exactly what this site does - the badge in the sidebar reflects which branch
-                it took.
+                This site does the same, except that a locked or unavailable OPFS falls back to an
+                in-memory database rather than a replica - the badge in the sidebar reflects which
+                branch it took.
             </p>
         </Panel>
         <Panel Title="Guard a durability point" IconName="disk">
             <CodeBlock ShowHeader="false" Code="@FlushPatternSnippet" />
             <p class="small mt-2 mb-0">
-                A background flush failure is remembered and rethrown from the next explicit
-                <code>FlushAsync</code> or from <code>DisposeAsync</code>, wrapped in a
-                <code>BlazeDbException</code>.
+                A background flush failure never loses data - the bytes go back into the buffer and
+                the flusher retries on its next tick. <code>db.LastBackgroundError</code> exposes the
+                standing failure (and clears once a flush succeeds), and an explicit
+                <code>FlushAsync</code> throws the storage error itself if it hits the same problem.
             </p>
         </Panel>
         <Panel Title="Keep memory and disk in step" IconName="txn">
@@ -241,14 +244,19 @@
         _results.Clear();
         StateHasChanged();
 
-        foreach (var item in Cases)
+        try
         {
-            await ExecuteAsync(item);
-            StateHasChanged();
-            await Task.Yield();
+            foreach (var item in Cases)
+            {
+                await ExecuteAsync(item);
+                StateHasChanged();
+                await Task.Yield();
+            }
         }
-
-        _busy = false;
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private async Task RunCaseAsync(Case item)
@@ -554,8 +562,10 @@
         [Index]
         public string? Category { get; set; }
 
-        // Rows with a null category, in O(1):
-        var uncategorised = table.Lookup(TodoEntry.Indexes.Category, null);
+        table.Lookup(TodoEntry.Indexes.Category, null);   // always empty: nulls are not indexed
+
+        // Rows with a null category are a scan:
+        var uncategorised = table.Scan().Where(static r => r.Category is null);
         """;
 
     private const string EmptySnippet = """
@@ -571,12 +581,18 @@
     private const string OpenPatternSnippet = """
         try
         {
-            return await Database.OpenAsync(options);
+            options.Storage = await OpfsStorage.CreateAsync("mydb");
         }
         catch (DatabaseLockedException)
         {
-            // Another tab owns the write lock: run read-only or wait.
-            return null;
+            // Another tab owns the write lock: open a read-only replica, or wait.
+            options.Storage = await OpfsStorage.CreateReadOnlyAsync("mydb");
+            options.ReadOnly = options.Storage is not null;
+        }
+
+        try
+        {
+            return await Database.OpenAsync(options);
         }
         catch (CorruptDatabaseException ex)
         {
@@ -591,12 +607,19 @@
         {
             await db.FlushAsync();
         }
-        catch (BlazeDbException ex)
+        catch (StorageQuotaExceededException ex)
         {
-            // Storage rejected the append - quota, permissions, a closed handle.
-            // Buffered bytes were put back, so a later flush can still succeed.
+            ShowStorageFullWarning(ex.Quota);   // data is safe in memory; free space, retry
+        }
+        catch (Exception ex)
+        {
+            // Storage rejected the append - permissions, a closed handle. Buffered
+            // bytes were put back, so a later flush can still succeed.
             ShowUnsavedWarning(ex);
         }
+
+        // Or, without forcing a flush, watch the background flusher:
+        if (db.LastBackgroundError is { } standing) ShowUnsavedWarning(standing);
         """;
 
     private const string TxnPatternSnippet = """

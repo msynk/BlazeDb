@@ -210,6 +210,34 @@ public class QuotaTests
     }
 
     [Fact]
+    public async Task Pressure_Is_Reported_Once_Per_Episode_Not_Once_Per_Refusal()
+    {
+        var reports = 0;
+        var storage = new QuotaLimitedStorage { QuotaBytes = 4_000 };
+        var (db, todos) = await OpenAsync(storage, o => o.OnQuotaPressure = _ => reports++);
+        await using var owned = db;
+        Fill(todos, 100);
+
+        // The background flusher would retry every tick; the application hears about it once.
+        await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
+        await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
+        Assert.Equal(1, reports);
+
+        // Space is freed, the flush succeeds, and a later refusal is a new episode. (The limit is
+        // lowered again here, which real quotas do not do; refreshing the estimate through the
+        // database is what makes the engine see it.)
+        storage.QuotaBytes = long.MaxValue;
+        await db.FlushAsync();
+        storage.QuotaBytes = storage.UsageBytes + 100;
+        await db.GetStorageQuotaAsync();
+        Fill(todos, 100);
+        await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
+        Assert.Equal(2, reports);
+
+        storage.QuotaBytes = long.MaxValue;
+    }
+
+    [Fact]
     public async Task The_Reserve_Keeps_Headroom_Free()
     {
         var storage = new QuotaLimitedStorage { QuotaBytes = 1_000_000 };

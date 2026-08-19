@@ -31,12 +31,12 @@ public sealed class HashIndexDefinition<TRow, TIndexKey> : IndexDefinition<TRow>
 internal sealed class HashIndexStore<TRow, TIndexKey> : IIndexStore<TRow>
 {
     private readonly HashIndexDefinition<TRow, TIndexKey> _definition;
-    private readonly Dictionary<TIndexKey, Dictionary<long, TRow>> _buckets;
+    private readonly Dictionary<TIndexKey, Bucket> _buckets;
 
     public HashIndexStore(HashIndexDefinition<TRow, TIndexKey> definition)
     {
         _definition = definition;
-        _buckets = new Dictionary<TIndexKey, Dictionary<long, TRow>>(definition.Comparer);
+        _buckets = new Dictionary<TIndexKey, Bucket>(definition.Comparer);
     }
 
     public object Definition => _definition;
@@ -50,9 +50,9 @@ internal sealed class HashIndexStore<TRow, TIndexKey> : IIndexStore<TRow>
         }
         if (!_buckets.TryGetValue(key, out var bucket))
         {
-            _buckets[key] = bucket = new Dictionary<long, TRow>();
+            _buckets[key] = bucket = new Bucket();
         }
-        bucket[seq] = row;
+        bucket.Add(seq, row);
     }
 
     public void Remove(TRow row, long seq)
@@ -81,23 +81,38 @@ internal sealed class HashIndexStore<TRow, TIndexKey> : IIndexStore<TRow>
         {
             return;
         }
-        foreach (var seq in bucket.Keys)
+        if (bucket.HasEntryOtherThan(replacedSeq))
         {
-            if (seq != replacedSeq)
-            {
-                throw new UniqueConstraintViolationException(tableName, _definition.Name, key);
-            }
+            throw new UniqueConstraintViolationException(tableName, _definition.Name, key);
         }
+    }
+
+    public bool EntryMatches(TRow row, long seq)
+    {
+        var key = _definition.Selector(row);
+        return key is null || (_buckets.TryGetValue(key, out var bucket) && bucket.Contains(seq));
     }
 
     public IEnumerable<TRow> Lookup(TIndexKey key)
     {
-        if (key is not null && _buckets.TryGetValue(key, out var bucket))
+        if (key is null)
         {
-            foreach (var row in bucket.Values)
-            {
-                yield return row;
-            }
+            return [];
+        }
+        // Resolved when enumeration starts, so an enumerable obtained before a write sees the table
+        // as it is when it is walked - the same deferred semantics as Scan and Range.
+        return LookupCore(key);
+    }
+
+    private IEnumerable<TRow> LookupCore(TIndexKey key)
+    {
+        if (!_buckets.TryGetValue(key, out var bucket))
+        {
+            yield break;
+        }
+        foreach (var row in bucket.Rows())
+        {
+            yield return row;
         }
     }
 
@@ -110,5 +125,76 @@ internal sealed class HashIndexStore<TRow, TIndexKey> : IIndexStore<TRow>
         throw new NotSupportedException(
             $"Index '{_definition.Name}' is a hash index and answers equality only. " +
             "Declare it with [OrderedIndex] to scan ranges.");
+
+    /// <summary>
+    /// The rows sharing one indexed value, keyed by row sequence number. Most values - every value
+    /// of a unique index, and most values of a selective one - map to a single row, so the bucket
+    /// holds that one entry inline and only grows a dictionary once a second row arrives. That keeps
+    /// a high-cardinality index at one small object per distinct value instead of one hash table
+    /// per distinct value, which matters when the whole database lives in a browser tab's memory.
+    /// </summary>
+    private sealed class Bucket
+    {
+        private bool _hasInline;
+        private long _seq;
+        private TRow _row = default!;
+        private Dictionary<long, TRow>? _many;
+
+        public int Count => _many?.Count ?? (_hasInline ? 1 : 0);
+
+        public void Add(long seq, TRow row)
+        {
+            if (_many is not null)
+            {
+                _many[seq] = row;
+            }
+            else if (!_hasInline || _seq == seq)
+            {
+                (_hasInline, _seq, _row) = (true, seq, row);
+            }
+            else
+            {
+                _many = new Dictionary<long, TRow> { [_seq] = _row, [seq] = row };
+                (_hasInline, _row) = (false, default!);
+            }
+        }
+
+        public bool Remove(long seq)
+        {
+            if (_many is not null)
+            {
+                return _many.Remove(seq);
+            }
+            if (!_hasInline || _seq != seq)
+            {
+                return false;
+            }
+            (_hasInline, _row) = (false, default!);
+            return true;
+        }
+
+        public bool Contains(long seq) =>
+            _many is not null ? _many.ContainsKey(seq) : _hasInline && _seq == seq;
+
+        public bool HasEntryOtherThan(long seq)
+        {
+            if (_many is null)
+            {
+                return _hasInline && _seq != seq;
+            }
+            foreach (var other in _many.Keys)
+            {
+                if (other != seq)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>The rows as of now; the caller (LookupCore) only asks once enumeration has begun.</summary>
+        public IEnumerable<TRow> Rows() =>
+            _many is not null ? _many.Values : _hasInline ? [_row] : [];
+    }
 }
 #pragma warning restore CS8714

@@ -49,20 +49,6 @@ public sealed class AppInterop(IJSRuntime js) : IAsyncDisposable
         }
     }
 
-    public async ValueTask<(long Usage, long Quota)> StorageEstimateAsync()
-    {
-        try
-        {
-            var module = await ModuleAsync();
-            var result = await module.InvokeAsync<StorageEstimate>("storageEstimate");
-            return (result.Usage, result.Quota);
-        }
-        catch (JSException)
-        {
-            return (-1, -1);
-        }
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (_module is not null)
@@ -78,6 +64,4 @@ public sealed class AppInterop(IJSRuntime js) : IAsyncDisposable
             _module = null;
         }
     }
-
-    private sealed record StorageEstimate(long Usage, long Quota);
 }

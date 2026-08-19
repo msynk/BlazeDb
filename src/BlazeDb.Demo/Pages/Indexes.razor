@@ -553,7 +553,7 @@ else
             _orderedCode =
                 $"todos.Range(TodoEntry.Indexes.CreatedAt,\n" +
                 $"            {(_fromUnbounded ? "Bound<DateTime>.Unbounded" : $"new DateTime({fromValue:yyyy}, {fromValue:MM}, {fromValue:dd})")},\n" +
-                $"            {(_toUnbounded ? "Bound<DateTime>.Unbounded" : $"new DateTime({toValue:yyyy}, {toValue:MM}, {toValue:dd})")},\n" +
+                $"            {(_toUnbounded ? "Bound<DateTime>.Unbounded" : $"new DateTime({_dateTo:yyyy}, {_dateTo:MM}, {_dateTo:dd}).AddDays(1).AddTicks(-1)")}, // end of that day\n" +
                 $"            descending: {_descending.ToString().ToLowerInvariant()})";
         }
 

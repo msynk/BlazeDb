@@ -267,8 +267,11 @@
 
         using (var txn = db.BeginTransaction())
         {
-            one!.Done = true;
-            todos.Update(one);
+            // Rows are live objects: hand Update a copy, so the table can still see the
+            // values its indexes were built from (or use UpdateInPlace with those values).
+            var changed = one!.Clone();
+            changed.Done = true;
+            todos.Update(changed);
             txn.Commit();
         }
 

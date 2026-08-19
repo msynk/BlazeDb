@@ -45,20 +45,33 @@ public class InPlaceWriteTests
     }
 
     [Fact]
-    public async Task A_Plain_Update_Would_Have_Stranded_The_Old_Entry()
+    public async Task A_Plain_Update_Of_A_Mutated_Instance_Is_Refused_Instead_Of_Stranding_The_Old_Entry()
     {
         var (db, accounts) = await OpenAsync();
         await using var owned = db;
         accounts.Insert(Make(1, tenant: 1));
 
-        // Mutating the stored instance and then calling the ordinary Update leaves the table with
-        // no record of the old value, so the tenant 1 entry survives. This is exactly the trap
-        // UpdateInPlace exists to avoid, and pinning it here keeps the reason visible.
+        // Mutating the stored instance and then calling the ordinary Update would leave the table
+        // with no record of the old value, so the tenant 1 entry would survive. Rather than let the
+        // index quietly go wrong, the write is refused and points at UpdateInPlace.
         var row = accounts.Get(1)!;
         row.TenantId = 2;
-        accounts.Update(row);
+        var ex = Assert.Throws<InvalidOperationException>(() => accounts.Update(row));
+        Assert.Contains("UpdateInPlace", ex.Message);
+        Assert.Contains("TenantId", ex.Message);
 
+        // Nothing changed: the table and its index still describe the row as it was written.
         Assert.Single(accounts.Lookup(Account.Indexes.TenantId, 1));
+        Assert.Empty(accounts.Lookup(Account.Indexes.TenantId, 2));
+
+        // A delete after the same in-place mutation is refused for the same reason...
+        Assert.Contains("DeleteInPlace", Assert.Throws<InvalidOperationException>(() => accounts.Delete(1)).Message);
+
+        // ...but the same instance with its indexed values restored is fine to hand back.
+        row.TenantId = 1;
+        accounts.Update(row);
+        Assert.Same(row, accounts.Get(1));
+        Assert.True(accounts.Delete(1));
     }
 
     [Fact]
@@ -74,6 +87,37 @@ public class InPlaceWriteTests
         row.Username = accounts.Get(1)!.Username;
 
         Assert.Throws<UniqueConstraintViolationException>(() => accounts.UpdateInPlace(row, before));
+    }
+
+    [Fact]
+    public async Task A_Rejected_In_Place_Update_Keeps_The_Instance_And_Allows_A_Corrected_Retry()
+    {
+        var (db, accounts) = await OpenAsync();
+        await using var owned = db;
+        accounts.Insert(Make(1, tenant: 1));
+        accounts.Insert(Make(2, tenant: 2));
+
+        var row = accounts.Get(2)!;
+        var before = new Account { Id = row.Id, Username = row.Username, TenantId = row.TenantId, Email = row.Email };
+        row.Username = accounts.Get(1)!.Username; // will be rejected
+        row.TenantId = 1;
+
+        Assert.Throws<UniqueConstraintViolationException>(() => accounts.UpdateInPlace(row, before));
+
+        // Nothing was written: the caller's instance is still the row (a change tracker keeps its
+        // identity), and the indexes still describe the values it had before the mutation.
+        Assert.Same(row, accounts.Get(2));
+        Assert.Single(accounts.Lookup(Account.Indexes.TenantId, 1));
+        Assert.Same(row, accounts.Lookup(Account.Indexes.TenantId, 2).Single());
+
+        // A corrected retry with the same previousValues finds those entries and moves them.
+        row.Username = "fresh";
+        row.TenantId = 3;
+        accounts.UpdateInPlace(row, before);
+        Assert.Same(row, accounts.Get(2));
+        Assert.Single(accounts.Lookup(Account.Indexes.TenantId, 1));
+        Assert.Empty(accounts.Lookup(Account.Indexes.TenantId, 2));
+        Assert.Single(accounts.Lookup(Account.Indexes.TenantId, 3));
     }
 
     [Fact]

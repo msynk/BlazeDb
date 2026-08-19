@@ -1,7 +1,6 @@
 @page "/storage"
 @implements IDisposable
 @inject DemoDbService Db
-@inject AppInterop Interop
 
 <PageTitle>Storage backends - BlazeDb</PageTitle>
 
@@ -214,15 +213,17 @@
 
             <Callout Tone="info" Title="What the browser backend does not do.">
                 There is no queue for becoming the writer, no notification when the lock frees up, and
-                cancellation tokens are accepted but not forwarded to JavaScript. Reader tabs are not a
-                feature yet - see the <a href="roadmap">roadmap</a>.
+                cancellation tokens are accepted but not forwarded to JavaScript. Other tabs can open
+                the same database read-only (<code>OpfsStorage.CreateReadOnlyAsync</code> plus
+                <code>DatabaseOptions.ReadOnly</code>) and follow the writer's checkpoints through
+                <code>TabSync</code>; this demo keeps things simple and falls back to memory instead.
             </Callout>
         </div>
     </div>
 </Section>
 
 <Section Title="The JavaScript surface" IconName="code"
-         Lead="One ES module, eight exported functions, shipped as a static web asset inside the package.">
+         Lead="One small ES module per concern - OPFS, IndexedDB, WebCrypto, BroadcastChannel - shipped as static web assets inside the package. This is the OPFS one.">
     <div class="grid grid-2">
         <CodeBlock Title="_content/BlazeDb.Browser/blazedb-opfs.js" Code="@JsSnippet" Language="text" />
         <div class="flex-col gap-lg">
@@ -248,6 +249,7 @@
     private long _usage = -1;
     private long _quota = -1;
     private bool _busy;
+    private bool _disposed;
     private string? _note;
     private string? _lockResult;
 
@@ -255,12 +257,22 @@
     {
         await Db.GetDatabaseAsync();
 
+        // The component may have been torn down while the database was opening; subscribing then
+        // would leak it through the singleton's event.
+        if (_disposed)
+        {
+            return;
+        }
         if (Db.Trace is not null)
         {
             Db.Trace.Changed += OnTraceChanged;
         }
 
-        (_usage, _quota) = await Interop.StorageEstimateAsync();
+        // The engine asks the backend, so this is the same figure its quota handling works from.
+        if (await Db.Db.GetStorageQuotaAsync() is { } quota)
+        {
+            (_usage, _quota) = (quota.UsageBytes, quota.QuotaBytes);
+        }
     }
 
     private void OnTraceChanged() => InvokeAsync(StateHasChanged);
@@ -343,7 +355,7 @@
 
             var bytes = await Db.Trace.ReadAsync("manifest.blz");
             _note = bytes is null
-                ? "storage.ReadAsync(\"manifest.blz\") → null\nNo snapshot has been taken yet, so there is no manifest."
+                ? "storage.ReadAsync(\"manifest.blz\") → null\nThe database has not been opened over this storage yet."
                 : $"storage.ReadAsync(\"manifest.blz\") → {bytes.Length} bytes\n" +
                   $"first bytes: {string.Join(' ', bytes.Take(12).Select(b => b.ToString("x2")))}";
         }
@@ -380,6 +392,7 @@
 
     public void Dispose()
     {
+        _disposed = true;
         if (Db.Trace is not null)
         {
             Db.Trace.Changed -= OnTraceChanged;
@@ -461,14 +474,17 @@
         """;
 
     private const string JsSnippet = """
-        export async function acquireLock(lockName)              // Promise<boolean>
-        export function       releaseLock(lockName)              // void
-        export async function openDatabaseDirectory(dbName)      // FileSystemDirectoryHandle
-        export async function readFile(directory, name)          // Uint8Array | null
-        export function       copyBytes(source, destination)      // void
-        export async function writeAtomic(directory, name, bytes) // createWritable + close
-        export async function appendFile(directory, name, bytes)  // keepExistingData: true
-        export async function deleteFile(directory, name)         // removeEntry
+        export async function acquireLock(lockName)                   // Promise<boolean>
+        export function       releaseLock(lockName)                   // void
+        export async function openDatabaseDirectory(dbName)           // FileSystemDirectoryHandle
+        export async function openExistingDatabaseDirectory(dbName)   // handle | null (replicas)
+        export async function readFile(directory, name)               // Uint8Array | null
+        export function       copyBytes(source, destination)          // void
+        export async function writeAtomic(directory, name, bytes)     // createWritable + close
+        export async function appendFile(directory, name, bytes)      // keepExistingData: true
+        export async function deleteFile(directory, name)             // removeEntry
+        export async function storageEstimate()                       // { usage, quota } | null
+        export async function requestPersistence()                    // Promise<boolean>
         """;
 
     private const string InteropSnippet = """

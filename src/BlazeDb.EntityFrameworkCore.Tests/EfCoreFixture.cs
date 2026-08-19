@@ -20,7 +20,8 @@ internal sealed class TestDatabase : IAsyncDisposable
                 FlushInterval = TimeSpan.FromHours(1),
             }
             .AddTable(Person.Table)
-            .AddTable(Order.Table));
+            .AddTable(Order.Table)
+            .AddTable(Tag.Table));
         return new TestDatabase(database);
     }
 
@@ -30,6 +31,8 @@ internal sealed class TestDatabase : IAsyncDisposable
     public Table<int, Person> People => Database.GetTable(Person.Table);
 
     public Table<int, Order> Orders => Database.GetTable(Order.Table);
+
+    public Table<string, Tag> Tags => Database.GetTable(Tag.Table);
 
     public ValueTask DisposeAsync() => Database.DisposeAsync();
 }

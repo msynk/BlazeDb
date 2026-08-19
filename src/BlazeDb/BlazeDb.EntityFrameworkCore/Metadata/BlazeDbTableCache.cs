@@ -39,6 +39,6 @@ internal sealed class BlazeDbTableCache : IBlazeDbTableCache
         _bindings.GetOrAdd(
             entityType,
             static (type, database) =>
-                BlazeDbTableResolver.CreateBinding(database, BlazeDbTableResolver.Resolve(type)),
+                BlazeDbTableResolver.CreateBinding(database, type),
             Database);
 }

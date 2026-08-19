@@ -7,7 +7,7 @@
             Lead="A Roslyn incremental generator turns an annotated partial class into a table descriptor, binary serializers, a key extractor and index definitions - all at compile time, so nothing is reflected at runtime.">
     <span class="chip"><Icon Name="cpu" /> Trimming &amp; AOT safe</span>
     <span class="chip"><Icon Name="index" /> @TodoEntry.Table.Indexes.Count index definitions generated</span>
-    <span class="chip"><Icon Name="code" /> 7 compile-time diagnostics</span>
+    <span class="chip"><Icon Name="code" /> 10 compile-time diagnostics</span>
 </PageHeader>
 
 <Section Title="The model this whole site runs on" IconName="code"
@@ -77,7 +77,7 @@
     </div>
 </Section>
 
-<Section Title="Attributes" IconName="tag" Lead="Six attributes describe everything the engine needs.">
+<Section Title="Attributes" IconName="tag" Lead="Eight attributes describe everything the engine needs.">
     <Panel Flush="true">
         <div class="table-wrap">
             <table class="data">
@@ -114,6 +114,21 @@
                         <td class="mono strong">[Ignore]</td>
                         <td>property</td>
                         <td>Excluded from serialization entirely. Still a normal property in memory.</td>
+                    </tr>
+                    <tr>
+                        <td class="mono strong">[Index(Unique = true)]</td>
+                        <td>property</td>
+                        <td>Either index attribute can be unique: a write that would duplicate a non-null value throws <code>UniqueConstraintViolationException</code> before anything is changed.</td>
+                    </tr>
+                    <tr>
+                        <td class="mono strong">[CompoundIndex(name, props…)]</td>
+                        <td>class · struct</td>
+                        <td>One hash index over several properties, keyed by their value tuple, so a filter on all of them is a single lookup. Repeatable; optional <code>Unique</code>.</td>
+                    </tr>
+                    <tr>
+                        <td class="mono strong">[CompoundOrderedIndex(name, props…)]</td>
+                        <td>class · struct</td>
+                        <td>The ordered equivalent: rows sort by the tuple, so a range over a leading-property prefix is one contiguous scan.</td>
                     </tr>
                 </tbody>
             </table>
@@ -182,7 +197,7 @@
 </Section>
 
 <Section Title="Generator diagnostics" IconName="alert"
-         Lead="Misuse is caught at build time. These are the seven errors the generator can report.">
+         Lead="Misuse is caught at build time. These are the ten errors the generator can report.">
     <Panel Flush="true">
         <div class="table-wrap">
             <table class="data">
@@ -224,6 +239,21 @@
                         <td class="mono strong">BLZ007</td>
                         <td>Generic or nested table type</td>
                         <td class="mono">[Table] partial class Foo&lt;T&gt;</td>
+                    </tr>
+                    <tr>
+                        <td class="mono strong">BLZ008</td>
+                        <td>Compound index names an unknown property</td>
+                        <td class="mono">[CompoundIndex("X", "Nope")]</td>
+                    </tr>
+                    <tr>
+                        <td class="mono strong">BLZ009</td>
+                        <td>Compound index needs at least two properties</td>
+                        <td class="mono">[CompoundIndex("X", "Only")]</td>
+                    </tr>
+                    <tr>
+                        <td class="mono strong">BLZ010</td>
+                        <td>Duplicate index name</td>
+                        <td class="mono">[Index(Name = "A")] twice</td>
                     </tr>
                 </tbody>
             </table>

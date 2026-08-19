@@ -1,4 +1,5 @@
 using BlazeDb;
+using BlazeDb.Storage;
 using Xunit;
 
 namespace BlazeDb.Tests;
@@ -111,5 +112,31 @@ public class TableCrudTests
         await using var db = await Database.OpenAsync(new DatabaseOptions());
 
         Assert.Throws<BlazeDbException>(() => db.GetTable(PersonTable.Descriptor));
+    }
+
+    [Fact]
+    public async Task Invalid_Options_Are_Rejected_Before_Opening()
+    {
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await Database.OpenAsync(new DatabaseOptions { FlushInterval = TimeSpan.Zero }));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await Database.OpenAsync(new DatabaseOptions { CheckpointWalSize = 0 }));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await Database.OpenAsync(new DatabaseOptions { QuotaReserveBytes = -1 }));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await Database.OpenAsync(new DatabaseOptions { ReadOnly = true }));
+    }
+
+    [Fact]
+    public async Task A_Disposed_Database_Refuses_Further_Use()
+    {
+        var db = await Database.OpenAsync(new DatabaseOptions { Storage = new InMemoryStorage() }.AddTable(PersonTable.Descriptor));
+        await db.DisposeAsync();
+
+        Assert.Throws<ObjectDisposedException>(() => db.BeginTransaction());
+        Assert.Throws<ObjectDisposedException>(() => db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "a", 1)));
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await db.FlushAsync());
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await db.CheckpointAsync());
+        await db.DisposeAsync(); // idempotent
     }
 }

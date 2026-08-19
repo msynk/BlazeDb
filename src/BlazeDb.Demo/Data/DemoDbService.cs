@@ -61,6 +61,30 @@ public sealed class DemoDbService : IAsyncDisposable
 
     private async Task<Database> OpenAsync()
     {
+        try
+        {
+            return await OpenCoreAsync();
+        }
+        catch
+        {
+            // Do not cache a failed attempt: the next page to ask gets a fresh try instead of the
+            // same faulted task forever. Whatever the attempt had already opened is released, or the
+            // retry would find this tab holding its own writer lock.
+            _opening = null;
+            try
+            {
+                await DisposeAsync();
+            }
+            catch
+            {
+                // The original failure is the one worth reporting.
+            }
+            throw;
+        }
+    }
+
+    private async Task<Database> OpenCoreAsync()
+    {
         IStorage backend;
 
         try
@@ -106,15 +130,24 @@ public sealed class DemoDbService : IAsyncDisposable
                 checkpointWalSize: 1 * 1024 * 1024);
         }
 
+        // Seed once per database, remembered in the settings table - not "whenever the table is
+        // empty", which would resurrect the sample rows after a visitor deliberately deleted them all.
         var todos = _db.GetTable(TodoEntry.Table);
-        if (todos.Count == 0)
+        var settings = _db.GetTable(Setting.Table);
+        if (settings.Get(SeededSetting) is null)
         {
-            DemoData.Seed(_db, todos);
+            if (todos.Count == 0)
+            {
+                DemoData.Seed(_db, todos);
+            }
+            settings.Upsert(new Setting { Name = SeededSetting, Value = "true", UpdatedAt = DateTime.UtcNow });
             await _db.FlushAsync();
         }
 
         return _db;
     }
+
+    private const string SeededSetting = "demo.seeded";
 
     public string GetSetting(string name, string fallback) =>
         Settings.Get(name)?.Value ?? fallback;

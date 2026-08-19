@@ -7,10 +7,11 @@ public sealed record StorageOp(int Seq, string Operation, string File, int Bytes
 
 /// <summary>
 /// A decorator over any <see cref="IStorage"/> that records every call the engine
-/// makes. This is the whole storage contract - four methods - so writing one is
+/// makes. This is the whole storage contract - four methods, plus the optional quota
+/// estimate that is passed straight through - so writing one is
 /// all it takes to put BlazeDb on a new backend.
 /// </summary>
-public sealed class InstrumentedStorage(IStorage inner, int capacity = 500) : IStorage
+public sealed class InstrumentedStorage(IStorage inner, int capacity = 500) : IQuotaAwareStorage
 {
     private readonly List<StorageOp> _ops = [];
     private int _seq;
@@ -68,6 +69,10 @@ public sealed class InstrumentedStorage(IStorage inner, int capacity = 500) : IS
         await Inner.DeleteAsync(name, cancellationToken);
         Record("DeleteAsync", name, 0, sw);
     }
+
+    /// <summary>The origin's estimate when the wrapped backend can report one; not traced, since the engine treats it as advisory.</summary>
+    public ValueTask<StorageQuota?> GetQuotaAsync(CancellationToken cancellationToken = default) =>
+        Inner is IQuotaAwareStorage quotaAware ? quotaAware.GetQuotaAsync(cancellationToken) : default;
 
     private void Record(string operation, string name, int bytes, Stopwatch sw)
     {

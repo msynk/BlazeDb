@@ -28,6 +28,13 @@ public abstract class TableDescriptor
 
     public string Name { get; }
 
+    /// <summary>
+    /// The row property the key selector reads, when known - the source generator always records it.
+    /// Query layers use it to send <c>row.Id == value</c> to the primary-key dictionary; null means a
+    /// hand-written descriptor did not say, and such predicates are filtered instead.
+    /// </summary>
+    public string? KeyMember { get; protected init; }
+
     internal abstract ITableInternal CreateTable(Database database);
 }
 
@@ -41,7 +48,8 @@ public sealed class TableDescriptor<TKey, TRow> : TableDescriptor
         RowReader<TRow> rowReader,
         KeyWriter<TKey> keyWriter,
         KeyReader<TKey> keyReader,
-        IReadOnlyList<IndexDefinition<TRow>>? indexes = null)
+        IReadOnlyList<IndexDefinition<TRow>>? indexes = null,
+        string? keyMember = null)
         : base(name)
     {
         KeySelector = keySelector;
@@ -50,10 +58,10 @@ public sealed class TableDescriptor<TKey, TRow> : TableDescriptor
         KeyWriter = keyWriter;
         KeyReader = keyReader;
         Indexes = indexes ?? [];
+        KeyMember = keyMember;
     }
 
     public Func<TRow, TKey> KeySelector { get; }
-
     public RowWriter<TRow> RowWriter { get; }
 
     public RowReader<TRow> RowReader { get; }

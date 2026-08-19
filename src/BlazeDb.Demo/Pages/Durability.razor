@@ -115,8 +115,9 @@
                     </button>
                 </div>
                 <p class="tiny muted mt-2 mb-0">
-                    “Crash” abandons the <code>Database</code> instance without disposing it, then opens a
-                    new one over the same bytes - exactly what closing a tab does.
+                    “Crash” abandons the <code>Database</code> instance - whatever it had not flushed is
+                    gone and it never touches storage again - then opens a new one over the same bytes,
+                    exactly what closing a tab does.
                 </p>
             </Panel>
 
@@ -135,7 +136,7 @@
                     {
                         <div class="empty">
                             <Icon Name="file" />
-                            <div>No files yet. Nothing has been flushed.</div>
+                            <div>Nothing on storage.</div>
                         </div>
                     }
                     else
@@ -169,7 +170,7 @@
                     <dd>@DemoSandbox.Bytes(_walBytes)</dd>
                     <dt>Snapshot size</dt>
                     <dd>@(_snapshotBytes == 0 ? "none yet" : DemoSandbox.Bytes(_snapshotBytes))</dd>
-                    <dt>Generation</dt>
+                    <dt>Times opened</dt>
                     <dd>@_generation</dd>
                     <dt>Last recovery</dt>
                     <dd>@_lastRecovery</dd>
@@ -262,6 +263,32 @@
         Refresh();
     }
 
+    /// <summary>
+    /// Abandons the running instance the way a closed tab would: whatever it has not flushed is
+    /// lost, and it never touches storage again. The bytes on storage are copied first and the copy
+    /// becomes the storage the next open reads from, so the abandoned instance's own shutdown flush
+    /// - and its background loop, which would otherwise keep running - cannot reach it.
+    /// </summary>
+    private async Task SimulateCrashAsync()
+    {
+        var crashed = _db;
+        _db = null;
+        _table = null;
+        _storage = _storage.Clone();
+
+        if (crashed is not null)
+        {
+            try
+            {
+                await crashed.DisposeAsync();
+            }
+            catch
+            {
+                // Its storage is being discarded; nothing it does now matters.
+            }
+        }
+    }
+
     private string FlushLabel() => _flushChoice switch
     {
         "fast" => "20 ms",
@@ -321,7 +348,7 @@
             _generation = 1;
             _log.Clear();
             await OpenAsync("opened empty");
-            _log.Add("Fresh storage", "new InMemoryStorage()", "No manifest, no snapshot, no log.");
+            _log.Add("Fresh storage", "new InMemoryStorage()", "Opening over empty storage writes a manifest that names an empty log; nothing else exists yet.");
         }
         finally
         {
@@ -561,7 +588,7 @@
             _log.Add("Flushed, then abandoned the instance", "no DisposeAsync - the process simply stops");
 
             _generation++;
-            _db = null;
+            await SimulateCrashAsync();
             await OpenAsync("recovered from an abandoned instance");
 
             _log.Ok(
@@ -616,7 +643,7 @@
                 "Committed in memory, buffered for the log, but the flusher is set to one hour.");
 
             _generation++;
-            _db = null;
+            await SimulateCrashAsync();
             await OpenAsync("recovered without the unflushed tail");
 
             _log.Error(
@@ -655,16 +682,25 @@
             }
 
             var bytes = _storage.GetFile(wal)!;
-            var torn = bytes.Concat(new byte[] { 0x10, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0x7F }).ToArray();
+            // A complete 16-byte record header (length 4096, a sequence number, a checksum) followed
+            // by only four bytes of the payload it announces - what a crash mid-append leaves behind.
+            byte[] tail =
+            [
+                0x00, 0x10, 0x00, 0x00,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F,
+                0xAA, 0xBB, 0xCC, 0xDD,
+                0x01, 0x02, 0x03, 0x04,
+            ];
+            var torn = bytes.Concat(tail).ToArray();
             _storage.SetFile(wal, torn);
 
             _log.Add(
-                "Appended 7 junk bytes to the log tail",
+                $"Appended {tail.Length} junk bytes to the log tail",
                 $"{wal}: {DemoSandbox.Bytes(bytes.Length)} → {DemoSandbox.Bytes(torn.Length)}",
                 "A record header that promises a payload the file does not contain.");
 
             _generation++;
-            _db = null;
+            await SimulateCrashAsync();
             await OpenAsync("recovered past a torn tail");
 
             _log.Ok(
@@ -715,13 +751,18 @@
             }
 
             var bytes = _storage.GetFile(wal)!;
+            if (bytes.Length == 0)
+            {
+                _log.Error("The log is empty", "insert some rows and flush first");
+                return;
+            }
             bytes[^1] ^= 0xFF;
             _storage.SetFile(wal, bytes);
 
             _log.Add("Flipped the last byte of the log", $"{wal}[^1] ^= 0xFF", "The final record's CRC no longer matches.");
 
             _generation++;
-            _db = null;
+            await SimulateCrashAsync();
             await OpenAsync("recovered up to the last valid record");
 
             _log.Ok(
@@ -764,7 +805,7 @@
             _log.Add("Damaged the manifest", "manifest.blz[^1] ^= 0xFF", "The manifest is written atomically, so this cannot happen by accident.");
 
             _generation++;
-            _db = null;
+            await SimulateCrashAsync();
             await OpenAsync("this should not be reached");
             _log.Error("Open succeeded", "unexpected - corruption went undetected");
         }

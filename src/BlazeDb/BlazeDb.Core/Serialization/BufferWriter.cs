@@ -127,7 +127,7 @@ public sealed class BufferWriter
     /// <summary>Fixed64 via <see cref="DateTime.ToBinary"/> (preserves Kind).</summary>
     public void WriteDateTime(DateTime value) => WriteFixed64((ulong)value.ToBinary());
 
-    /// <summary>Length-delimited 16 bytes: UTC ticks + offset ticks.</summary>
+    /// <summary>Length-delimited 16 bytes: clock ticks (in the offset's local time) + offset ticks.</summary>
     public void WriteDateTimeOffset(DateTimeOffset value)
     {
         WriteVarUInt(16);

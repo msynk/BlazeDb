@@ -37,7 +37,7 @@ internal sealed class WalManager : IAsyncDisposable
     private readonly SemaphoreSlim _ioLock = new(1, 1);
     private readonly CancellationTokenSource _cts = new();
     private Task _loop = Task.CompletedTask;
-    private Exception? _fault;
+    private volatile Exception? _fault;
 
     private ulong _generation;
     private string _walFile = "";
@@ -47,6 +47,7 @@ internal sealed class WalManager : IAsyncDisposable
     private long _walSize;
 
     private StorageQuota? _lastQuota;
+    private bool _quotaPressureReported;
     private long _bytesSinceQuotaCheck;
 
     private WalManager(Database db, DatabaseOptions options)
@@ -125,6 +126,13 @@ internal sealed class WalManager : IAsyncDisposable
         _fault = null;
     }
 
+    /// <summary>
+    /// The error the most recent background flush or checkpoint failed with, or null once one has
+    /// since succeeded. Lets an application notice that durability is lagging without waiting for
+    /// an explicit flush to hit the same problem.
+    /// </summary>
+    public Exception? LastBackgroundError => _fault;
+
     /// <summary>Current storage usage, or null when the backend cannot report it.</summary>
     public async ValueTask<StorageQuota?> GetQuotaAsync(CancellationToken ct = default)
     {
@@ -177,14 +185,23 @@ internal sealed class WalManager : IAsyncDisposable
                 }
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not BlazeDbException)
         {
-            // Compaction itself ran out of room; fall through to the deliberate failure below.
+            // Compaction itself ran out of room; fall through to the deliberate failure below. (An
+            // engine-level error - a checkpoint that succeeded but whose announcement failed - is
+            // not a quota problem and propagates as itself.)
         }
 
         var quota = _lastQuota ?? default;
         _lastQuota = null; // Force a fresh estimate next time; space may have been freed since.
-        _options.OnQuotaPressure?.Invoke(quota);
+        if (!_quotaPressureReported)
+        {
+            // Once per episode: the flusher retries every tick, and an application that is asked to
+            // prompt the user does not want to be asked again 100 ms later. A successful flush ends
+            // the episode, so a later refusal is reported afresh.
+            _quotaPressureReported = true;
+            _options.OnQuotaPressure?.Invoke(quota);
+        }
         throw new StorageQuotaExceededException(quota, pendingBytes);
     }
 
@@ -242,26 +259,37 @@ internal sealed class WalManager : IAsyncDisposable
                 {
                     return;
                 }
-                await EnsureQuotaHeadroomAsync(_cts.Token).ConfigureAwait(false);
-                await FlushPendingAsync(_cts.Token).ConfigureAwait(false);
+                // Only the wait is cancellable. Once a flush has started it runs to completion:
+                // interrupting an append mid-write and re-issuing it later could leave a torn
+                // record in front of the retry, and replay stops at the first torn record.
+                await EnsureQuotaHeadroomAsync(CancellationToken.None).ConfigureAwait(false);
+                // A standing error clears only when something actually succeeded - a tick with
+                // nothing to write proves nothing and must not hide a checkpoint that keeps failing.
+                if (await FlushPendingAsync(CancellationToken.None).ConfigureAwait(false))
+                {
+                    _fault = null;
+                }
                 if (Volatile.Read(ref _walSize) > _options.CheckpointWalSize)
                 {
-                    await CheckpointCoreAsync(_cts.Token).ConfigureAwait(false);
+                    await CheckpointCoreAsync(CancellationToken.None).ConfigureAwait(false);
+                    _fault = null;
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (_cts.IsCancellationRequested)
             {
                 return;
             }
             catch (Exception ex)
             {
-                // Keep the loop alive; surface the failure on the next explicit FlushAsync.
+                // Keep the loop alive and retry on the next tick; un-flushed bytes were put back.
+                // The failure is visible through LastBackgroundError until a later flush or
+                // checkpoint succeeds, and an explicit FlushAsync throws if it hits the same problem.
                 _fault = ex;
             }
         }
     }
 
-    private async ValueTask FlushPendingAsync(CancellationToken ct)
+    private async ValueTask<bool> FlushPendingAsync(CancellationToken ct)
     {
         await _ioLock.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -277,12 +305,13 @@ internal sealed class WalManager : IAsyncDisposable
             }
             if (chunk is null)
             {
-                return;
+                return false;
             }
             try
             {
                 await _storage.AppendAsync(_walFile, chunk, ct).ConfigureAwait(false);
                 _walSize += chunk.Length;
+                _quotaPressureReported = false;
             }
             catch
             {
@@ -296,6 +325,7 @@ internal sealed class WalManager : IAsyncDisposable
                 }
                 throw;
             }
+            return true;
         }
         finally
         {
@@ -373,6 +403,7 @@ internal sealed class WalManager : IAsyncDisposable
             _walFile = newWalFile;
             _snapshotLsn = snapshotLsn;
             _walSize = 0;
+            _quotaPressureReported = false; // Compaction freed space; the next refusal is a new episode.
 
             await _storage.DeleteAsync(oldWalFile, ct).ConfigureAwait(false);
             if (oldSnapshotFile.Length > 0)
@@ -381,8 +412,19 @@ internal sealed class WalManager : IAsyncDisposable
             }
 
             // Announced only once the new generation is durable and the old one is gone, so a
-            // replica that reloads on this signal cannot land on a half-published generation.
-            _options.OnCheckpoint?.Invoke(newGeneration);
+            // replica that reloads on this signal cannot land on a half-published generation. The
+            // checkpoint itself has succeeded by now, so a failing announcement is reported as its
+            // own error rather than as a failed checkpoint - a caller (or the flusher) must not redo
+            // a checkpoint that is already in place.
+            try
+            {
+                _options.OnCheckpoint?.Invoke(newGeneration);
+            }
+            catch (Exception ex)
+            {
+                throw new BlazeDbException(
+                    $"Checkpoint {newGeneration} is durable, but the OnCheckpoint callback failed.", ex);
+            }
             return true;
         }
         finally
@@ -417,13 +459,32 @@ internal sealed class WalManager : IAsyncDisposable
         {
             var snapshotBytes = await _storage.ReadAsync(_snapshotFile, ct).ConfigureAwait(false)
                 ?? throw new CorruptDatabaseException($"Manifest references missing snapshot '{_snapshotFile}'.");
-            LoadSnapshot(snapshotBytes);
+            try
+            {
+                LoadSnapshot(snapshotBytes);
+            }
+            catch (Exception ex) when (IsDecodeFailure(ex))
+            {
+                throw new CorruptDatabaseException(
+                    $"Snapshot '{_snapshotFile}' passed its checksum but could not be decoded; the row " +
+                    "format may not match the registered table descriptors.", ex);
+            }
         }
 
         var walBytes = await _storage.ReadAsync(_walFile, ct).ConfigureAwait(false);
         if (walBytes is not null)
         {
-            var validLength = ReplayWal(walBytes);
+            int validLength;
+            try
+            {
+                validLength = ReplayWal(walBytes);
+            }
+            catch (Exception ex) when (IsDecodeFailure(ex))
+            {
+                throw new CorruptDatabaseException(
+                    $"A record in '{_walFile}' passed its checksum but could not be decoded; the row " +
+                    "format may not match the registered table descriptors.", ex);
+            }
             if (validLength < walBytes.Length && !_options.ReadOnly)
             {
                 // Torn tail detected: truncate so future appends continue from a clean point.
@@ -467,6 +528,13 @@ internal sealed class WalManager : IAsyncDisposable
         }
         return offset;
     }
+
+    /// <summary>
+    /// Decoding errors that a checksum cannot catch: a well-formed file whose contents do not match
+    /// the descriptors this database was opened with. Readers report malformed bytes as
+    /// <see cref="InvalidDataException"/>; the checked count casts in the loaders overflow instead.
+    /// </summary>
+    private static bool IsDecodeFailure(Exception ex) => ex is InvalidDataException or OverflowException;
 
     private void ReplayCommit(ReadOnlySpan<byte> payload)
     {
@@ -596,10 +664,5 @@ internal sealed class WalManager : IAsyncDisposable
         }
         _cts.Dispose();
         _ioLock.Dispose();
-
-        if (_fault is not null)
-        {
-            throw new BlazeDbException("A background WAL flush failed earlier.", _fault);
-        }
     }
 }

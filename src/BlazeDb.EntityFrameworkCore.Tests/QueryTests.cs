@@ -198,6 +198,21 @@ public class QueryTests
     }
 
     [Fact]
+    public async Task A_Context_Wide_No_Tracking_Setting_Is_Honored()
+    {
+        await using var test = await SeededAsync();
+        using var context = test.CreateContext();
+        context.ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.NoTrackingWithIdentityResolution;
+
+        Assert.Equal(5, context.People.ToList().Count);
+        Assert.Empty(context.ChangeTracker.Entries());
+
+        // An explicit AsTracking on the query still wins over the context default.
+        Assert.Equal(5, context.People.AsTracking().ToList().Count);
+        Assert.Equal(5, context.ChangeTracker.Entries().Count());
+    }
+
+    [Fact]
     public async Task Counting_Does_Not_Track_The_Rows_It_Reads()
     {
         await using var test = await SeededAsync();

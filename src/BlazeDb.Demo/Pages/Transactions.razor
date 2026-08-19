@@ -709,7 +709,13 @@
             var inMemory = table.Count;
             await db.FlushAsync();
 
-            // The instance is abandoned on purpose - no DisposeAsync, like a closed tab.
+            // Simulate the crash: the bytes that made it to storage are copied out, and the running
+            // instance is torn down against the original - so nothing it does from here on (its
+            // shutdown flush, its background loop) can reach what the reopen reads.
+            var survivor = storage.Clone();
+            await db.DisposeAsync();
+            storage = survivor;
+
             await using var reopened = await DemoSandbox.OpenAsync(storage, TimeSpan.FromHours(1), long.MaxValue);
             var recovered = reopened.GetTable(TodoEntry.Table).Count;
 

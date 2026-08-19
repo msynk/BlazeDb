@@ -96,7 +96,7 @@ internal sealed class BlazeDbQueryExecutor
             return false;
         }
         if (trackingOverride != true &&
-            context.ChangeTracker.QueryTrackingBehavior == QueryTrackingBehavior.NoTracking)
+            context.ChangeTracker.QueryTrackingBehavior != QueryTrackingBehavior.TrackAll)
         {
             return false;
         }

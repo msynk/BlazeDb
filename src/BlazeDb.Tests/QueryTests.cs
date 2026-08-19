@@ -246,4 +246,50 @@ public class QueryTests
         Assert.Throws<InvalidOperationException>(() =>
             query.UseIndex(TodoItem.Indexes.CreatedAt, Bound<DateTime>.Unbounded, Bound<DateTime>.Unbounded));
     }
+
+    [Fact]
+    public async Task Query_Can_Source_A_Single_Row_By_Primary_Key()
+    {
+        var (db, todos) = await OpenAsync();
+        await using var _ = db;
+        var a = Make("a", done: true);
+        var b = Make("b");
+        todos.Insert(a);
+        todos.Insert(b);
+
+        Assert.Same(a, Query<Guid, TodoItem>.From(todos).UseKey(a.Id).FirstOrDefault());
+        Assert.Empty(Query<Guid, TodoItem>.From(todos).UseKey(Guid.NewGuid()).ToList());
+        // Residual filters still apply on top of the key source.
+        Assert.Empty(Query<Guid, TodoItem>.From(todos).UseKey(a.Id).Where(t => !t.Done).ToList());
+        Assert.Throws<InvalidOperationException>(() =>
+            Query<Guid, TodoItem>.From(todos).UseKey(a.Id).UseIndex(TodoItem.Indexes.Done, true));
+    }
+
+    [Fact]
+    public async Task Query_Can_Source_Several_Rows_By_Primary_Key()
+    {
+        var (db, todos) = await OpenAsync();
+        await using var _ = db;
+        var a = Make("a");
+        var b = Make("b");
+        var c = Make("c");
+        todos.Insert(a);
+        todos.Insert(b);
+        todos.Insert(c);
+
+        // Order follows the keys; duplicates and misses are skipped.
+        var rows = Query<Guid, TodoItem>.From(todos).UseKeys([c.Id, Guid.NewGuid(), a.Id, c.Id]).ToList();
+        Assert.Equal(["c", "a"], rows.Select(t => t.Title));
+        Assert.Empty(Query<Guid, TodoItem>.From(todos).UseKeys([]).ToList());
+    }
+
+    [Fact]
+    public async Task Query_Rejects_Negative_Paging()
+    {
+        var (db, todos) = await OpenAsync();
+        await using var _ = db;
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => Query<Guid, TodoItem>.From(todos).Skip(-1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Query<Guid, TodoItem>.From(todos).Take(-1));
+    }
 }

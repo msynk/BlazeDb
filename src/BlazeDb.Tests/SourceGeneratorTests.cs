@@ -39,6 +39,8 @@ public class SourceGeneratorTests
         Assert.Equal("todos", TodoItem.Table.Name);
         var item = SampleTodo();
         Assert.Equal(item.Id, TodoItem.Table.KeySelector(item));
+        Assert.Equal(nameof(TodoItem.Id), TodoItem.Table.KeyMember);
+        Assert.Equal(nameof(Setting.Name), Setting.Table.KeyMember);
     }
 
     [Fact]
@@ -155,5 +157,24 @@ public class SourceGeneratorTests
         var decoded = Setting.Table.RowReader(ref reader);
         Assert.Equal("a", decoded.Name);
         Assert.Equal("b", decoded.Value);
+    }
+
+    [Fact]
+    public void A_Known_Field_Written_With_Another_Wire_Type_Is_Skipped_Not_Misread()
+    {
+        // Simulate a schema in which Setting.Value (field 9, a string) used to be an integer. The
+        // reader must not try to decode a varint as a length-prefixed string - which would either
+        // throw or desynchronize every field after it - but treat it as unknown and move on.
+        var writer = new BufferWriter();
+        writer.WriteTag(9, WireType.VarInt);
+        writer.WriteVarInt(12345);
+        writer.WriteTag(5, WireType.LengthDelimited);
+        writer.WriteString("name-after-the-changed-field");
+
+        var reader = new BufferReader(writer.WrittenSpan);
+        var decoded = Setting.Table.RowReader(ref reader);
+
+        Assert.Equal("name-after-the-changed-field", decoded.Name);
+        Assert.Equal("", decoded.Value);
     }
 }

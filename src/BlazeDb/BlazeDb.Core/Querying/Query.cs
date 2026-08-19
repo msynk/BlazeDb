@@ -24,6 +24,43 @@ public sealed class Query<TKey, TRow>
 
     public static Query<TKey, TRow> From(Table<TKey, TRow> table) => new(table);
 
+    /// <summary>
+    /// Sources at most one row: the one with primary key <paramref name="key"/>. This is the
+    /// primary-key dictionary, so it is O(1) regardless of what else the query does - a
+    /// <c>Where(row => row.Id == id)</c> should land here rather than on a scan.
+    /// </summary>
+    public Query<TKey, TRow> UseKey(TKey key)
+    {
+        EnsureNoSource();
+        _source = () => _table.TryGet(key, out var row) ? [row] : [];
+        return this;
+    }
+
+    /// <summary>
+    /// Sources the rows whose primary key is one of <paramref name="keys"/>, in the order the keys
+    /// are given (duplicates ignored, misses skipped). One dictionary probe per key, so an
+    /// <c>ids.Contains(row.Id)</c> stays proportional to the list rather than to the table.
+    /// </summary>
+    public Query<TKey, TRow> UseKeys(IEnumerable<TKey> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        EnsureNoSource();
+        _source = () => LookupKeys(keys);
+        return this;
+    }
+
+    private IEnumerable<TRow> LookupKeys(IEnumerable<TKey> keys)
+    {
+        var seen = new HashSet<TKey>();
+        foreach (var key in keys)
+        {
+            if (seen.Add(key) && _table.TryGet(key, out var row))
+            {
+                yield return row;
+            }
+        }
+    }
+
     /// <summary>Sources rows from a hash-index equality lookup instead of a full scan.</summary>
     public Query<TKey, TRow> UseIndex<TIndexKey>(HashIndexDefinition<TRow, TIndexKey> index, TIndexKey equals)
     {
@@ -57,7 +94,20 @@ public sealed class Query<TKey, TRow>
         return this;
     }
 
-    /// <summary>Ordered-index range scan with boxed bounds. See <see cref="UseIndexBoxed"/>.</summary>
+    /// <summary>
+    /// Sources the union of the lookups for several boxed keys against one index. Rows have one
+    /// indexed value each, so the lookups are disjoint once the keys are distinct - which the caller
+    /// guarantees - and no row is produced twice.
+    /// </summary>
+    internal Query<TKey, TRow> UseIndexBoxed(IndexDefinition<TRow> index, IReadOnlyList<object> keys)
+    {
+        EnsureNoSource();
+        var store = _table.GetIndexStore(index);
+        _source = () => keys.SelectMany(store.LookupBoxed);
+        return this;
+    }
+
+    /// <summary>Ordered-index range scan with boxed bounds. See <see cref="UseIndexBoxed(IndexDefinition{TRow}, object)"/>.</summary>
     internal Query<TKey, TRow> UseIndexBoxed(
         IndexDefinition<TRow> index, bool hasFrom, object? from, bool hasTo, object? to, bool descending)
     {
@@ -98,12 +148,14 @@ public sealed class Query<TKey, TRow>
 
     public Query<TKey, TRow> Skip(int count)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
         _skip = count;
         return this;
     }
 
     public Query<TKey, TRow> Take(int count)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
         _take = count;
         return this;
     }

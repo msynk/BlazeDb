@@ -81,6 +81,17 @@ public class EncryptionTests
     }
 
     [Fact]
+    public async Task Quota_Awareness_Passes_Through_The_Wrapper()
+    {
+        // Encrypting a browser database must not cost it the engine's quota handling.
+        using var quotaAware = Wrap(new QuotaLimitedStorage { QuotaBytes = 1234 });
+        Assert.Equal(1234, (await quotaAware.GetQuotaAsync())!.Value.QuotaBytes);
+
+        using var plain = Wrap(new InMemoryStorage());
+        Assert.Null(await plain.GetQuotaAsync());
+    }
+
+    [Fact]
     public async Task Wrong_Key_Is_Reported_As_Corruption()
     {
         var inner = new InMemoryStorage();

@@ -93,6 +93,76 @@ public class DurabilityTests
     }
 
     [Fact]
+    public async Task A_Transient_Background_Failure_Is_Reported_Then_Retried_And_Cleared()
+    {
+        var storage = new FlakyStorage { FailAppends = true };
+
+        var db = await OpenAsync(storage, flushInterval: TimeSpan.FromMilliseconds(20));
+        db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "Ada", 36));
+
+        await WaitUntilAsync(() => db.LastBackgroundError is not null, "the flusher never reported its failure");
+        Assert.IsType<IOException>(db.LastBackgroundError);
+
+        // Storage recovers: the flusher retries on its own, the record lands, and the error clears.
+        storage.FailAppends = false;
+        await WaitUntilAsync(() => db.LastBackgroundError is null, "the flusher never recovered");
+
+        // A clean shutdown after a recovered failure must not throw a stale error.
+        await db.DisposeAsync();
+
+        await using var reopened = await OpenAsync(storage);
+        Assert.True(reopened.GetTable(PersonTable.Descriptor).Contains(1));
+    }
+
+    [Fact]
+    public async Task Disposing_Surfaces_A_Failure_That_Is_Still_Standing()
+    {
+        var storage = new FlakyStorage { FailAppends = true };
+
+        var db = await OpenAsync(storage);
+        db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "Ada", 36));
+
+        // The final flush cannot get the record onto storage, and says so.
+        await Assert.ThrowsAsync<IOException>(async () => await db.DisposeAsync());
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, string failure)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition())
+            {
+                return;
+            }
+            await Task.Delay(20);
+        }
+        Assert.Fail($"Timed out: {failure}.");
+    }
+
+    /// <summary>An in-memory backend whose appends can be made to fail on demand.</summary>
+    private sealed class FlakyStorage : IStorage
+    {
+        private readonly InMemoryStorage _inner = new();
+
+        public bool FailAppends { get; set; }
+
+        public ValueTask<byte[]?> ReadAsync(string name, CancellationToken cancellationToken = default) =>
+            _inner.ReadAsync(name, cancellationToken);
+
+        public ValueTask WriteAtomicAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) =>
+            _inner.WriteAtomicAsync(name, data, cancellationToken);
+
+        public ValueTask AppendAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) =>
+            FailAppends
+                ? throw new IOException("Simulated storage failure.")
+                : _inner.AppendAsync(name, data, cancellationToken);
+
+        public ValueTask DeleteAsync(string name, CancellationToken cancellationToken = default) =>
+            _inner.DeleteAsync(name, cancellationToken);
+    }
+
+    [Fact]
     public async Task Torn_Tail_Is_Discarded_And_Wal_Keeps_Working()
     {
         var storage = new InMemoryStorage();

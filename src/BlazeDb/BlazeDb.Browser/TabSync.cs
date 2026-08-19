@@ -113,15 +113,28 @@ public sealed class TabSync : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The error the most recent announced reload failed with, or null once one has succeeded.
+    /// A failed reload is retried on the next checkpoint; this exists so the tab can tell that
+    /// it is falling behind rather than having the failure vanish into an unobserved task.
+    /// </summary>
+    public Exception? LastError { get; private set; }
+
     private async Task OnCheckpointAnnouncedAsync()
     {
         try
         {
             await RefreshAsync().ConfigureAwait(false);
+            LastError = null;
         }
         catch (ObjectDisposedException)
         {
             // The tab tore the database down between the announcement and the reload.
+        }
+        catch (Exception ex)
+        {
+            // Nothing awaits this task, so an exception here would be lost; keep it visible instead.
+            LastError = ex;
         }
     }
 

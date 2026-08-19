@@ -58,6 +58,7 @@
 
 @code {
     private bool _navOpen;
+    private bool _disposed;
     private NavItem? _current;
 
     protected override void OnInitialized()
@@ -76,8 +77,18 @@
         catch (Exception)
         {
             // The sidebar reports the degraded state; individual pages surface details.
+            return;
+        }
+
+        // The row-count chip would otherwise only refresh on navigation. Every write reaches storage
+        // within a flush interval, and the trace fires on each storage call, so it is a cheap signal.
+        if (!_disposed && Db.Trace is not null)
+        {
+            Db.Trace.Changed += OnStorageActivity;
         }
     }
+
+    private void OnStorageActivity() => InvokeAsync(StateHasChanged);
 
     private string StorageDot => Db.Mode switch
     {
@@ -105,5 +116,13 @@
 
     private void CloseNav() => _navOpen = false;
 
-    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+    public void Dispose()
+    {
+        _disposed = true;
+        Nav.LocationChanged -= OnLocationChanged;
+        if (Db.Trace is not null)
+        {
+            Db.Trace.Changed -= OnStorageActivity;
+        }
+    }
 }

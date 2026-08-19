@@ -136,7 +136,12 @@ public sealed class Table<TKey, TRow> : ITableInternal
         _db.ApplyWrite(new SetOp(this, key, row, hadOld: false, default, 0));
     }
 
-    /// <summary>Replaces an existing row; throws <see cref="KeyNotFoundException"/> if missing.</summary>
+    /// <summary>
+    /// Replaces an existing row; throws <see cref="KeyNotFoundException"/> if missing. Pass a new
+    /// instance (or an unmodified one): the table finds the index entries to retract through the
+    /// values of the row it currently holds, so mutating that instance's indexed properties first
+    /// and then passing it back is rejected - use <see cref="UpdateInPlace"/> for that.
+    /// </summary>
     public void Update(TRow row)
     {
         var key = Descriptor.KeySelector(row);
@@ -144,17 +149,48 @@ public sealed class Table<TKey, TRow> : ITableInternal
         {
             throw new KeyNotFoundException($"Table '{Name}' has no row with key '{key}'.");
         }
+        EnsureNotMutatedInPlace(row, old, nameof(UpdateInPlace));
         ValidateUnique(row, old.Seq);
         _db.ApplyWrite(new SetOp(this, key, row, hadOld: true, old.Row, old.Seq));
     }
 
-    /// <summary>Inserts or replaces.</summary>
+    /// <summary>Inserts or replaces. See <see cref="Update"/> for the rules on replacing.</summary>
     public void Upsert(TRow row)
     {
         var key = Descriptor.KeySelector(row);
         var had = _rows.TryGetValue(key, out var old);
+        if (had)
+        {
+            EnsureNotMutatedInPlace(row, old, nameof(UpdateInPlace));
+        }
         ValidateUnique(row, had ? old.Seq : 0);
         _db.ApplyWrite(new SetOp(this, key, row, had, had ? old.Row : default, old.Seq));
+    }
+
+    /// <summary>
+    /// Refuses a write that would strand index entries: the caller mutated the very instance the
+    /// table holds and handed it back, so the values the indexes were built from are gone. Failing
+    /// here, with a pointer to the right call, beats an index that quietly returns wrong rows. The
+    /// check is only paid on that path - a fresh instance never triggers it - and it cannot see a
+    /// value that was changed to null, since nulls are not indexed; the caller-side rule stands.
+    /// </summary>
+    private void EnsureNotMutatedInPlace(TRow row, Entry held, string alternative)
+    {
+        if (!ReferenceEquals(row, held.Row))
+        {
+            return;
+        }
+        foreach (var store in _indexStores)
+        {
+            if (!store.EntryMatches(row, held.Seq))
+            {
+                throw new InvalidOperationException(
+                    $"The row being written to table '{Name}' is the instance the table already holds, and " +
+                    $"its value for index '{((IndexDefinition<TRow>)store.Definition).Name}' was changed in place. " +
+                    "The table can no longer find the entry to retract, so the write is refused. Pass a new " +
+                    $"row instance instead, or call {alternative} with the values the row had when it was last written.");
+            }
+        }
     }
 
     /// <summary>
@@ -169,13 +205,18 @@ public sealed class Table<TKey, TRow> : ITableInternal
         }
     }
 
-    /// <summary>Removes a row; returns false if the key does not exist.</summary>
+    /// <summary>
+    /// Removes a row; returns false if the key does not exist. If the held instance was mutated in
+    /// place since it was written, the delete is refused for the same reason as <see cref="Update"/>;
+    /// use <see cref="DeleteInPlace"/> then.
+    /// </summary>
     public bool Delete(TKey key)
     {
         if (!_rows.TryGetValue(key, out var old))
         {
             return false;
         }
+        EnsureNotMutatedInPlace(old.Row, old, nameof(DeleteInPlace));
         _db.ApplyWrite(new DeleteOp(this, key, old.Row, old.Seq));
         return true;
     }
@@ -196,6 +237,7 @@ public sealed class Table<TKey, TRow> : ITableInternal
     /// </summary>
     public void UpdateInPlace(TRow row, TRow previousValues)
     {
+        _db.EnsureWritable();
         var key = Descriptor.KeySelector(row);
         if (!_rows.TryGetValue(key, out var old))
         {
@@ -208,7 +250,14 @@ public sealed class Table<TKey, TRow> : ITableInternal
                 "delete the old row and insert a new one.");
         }
 
+        // A violation is checked before anything is touched. The caller's instance stays the row the
+        // table holds - a change tracker keeps its identity, and a corrected retry with the same
+        // previousValues still finds the index entries - while the indexes go on describing the
+        // pre-mutation values until a write moves them.
         ValidateUnique(row, old.Seq);
+
+        // Point the entry at the pre-mutation values so the write's index maintenance retracts the
+        // entries that actually exist (and so a rollback restores them).
         _rows[key] = new Entry(previousValues, old.Seq);
         _db.ApplyWrite(new SetOp(this, key, row, hadOld: true, previousValues, old.Seq));
     }
@@ -219,6 +268,7 @@ public sealed class Table<TKey, TRow> : ITableInternal
     /// </summary>
     public bool DeleteInPlace(TKey key, TRow previousValues)
     {
+        _db.EnsureWritable();
         if (!_rows.TryGetValue(key, out var old))
         {
             return false;

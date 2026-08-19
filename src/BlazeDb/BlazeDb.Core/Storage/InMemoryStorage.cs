@@ -1,3 +1,5 @@
+using BlazeDb.Serialization;
+
 namespace BlazeDb.Storage;
 
 /// <summary>
@@ -8,13 +10,16 @@ namespace BlazeDb.Storage;
 public sealed class InMemoryStorage : IStorage
 {
     private readonly object _lock = new();
-    private readonly Dictionary<string, byte[]> _files = new();
+
+    // Each file is a growable buffer, so appending - which the WAL does on every flush - is
+    // amortized O(1) rather than a copy of everything written before.
+    private readonly Dictionary<string, BufferWriter> _files = new();
 
     public ValueTask<byte[]?> ReadAsync(string name, CancellationToken cancellationToken = default)
     {
         lock (_lock)
         {
-            return ValueTask.FromResult(_files.TryGetValue(name, out var data) ? data.ToArray() : (byte[]?)null);
+            return ValueTask.FromResult(_files.TryGetValue(name, out var file) ? file.ToArray() : (byte[]?)null);
         }
     }
 
@@ -22,7 +27,7 @@ public sealed class InMemoryStorage : IStorage
     {
         lock (_lock)
         {
-            _files[name] = data.ToArray();
+            Replace(name, data.Span);
         }
         return default;
     }
@@ -31,17 +36,11 @@ public sealed class InMemoryStorage : IStorage
     {
         lock (_lock)
         {
-            if (_files.TryGetValue(name, out var existing))
+            if (!_files.TryGetValue(name, out var file))
             {
-                var combined = new byte[existing.Length + data.Length];
-                existing.CopyTo(combined, 0);
-                data.Span.CopyTo(combined.AsSpan(existing.Length));
-                _files[name] = combined;
+                _files[name] = file = new BufferWriter();
             }
-            else
-            {
-                _files[name] = data.ToArray();
-            }
+            file.WriteRaw(data.Span);
         }
         return default;
     }
@@ -56,6 +55,24 @@ public sealed class InMemoryStorage : IStorage
     }
 
     // ---- Test helpers ----
+
+    /// <summary>
+    /// A deep copy of every file as it is now. Handy for simulating a crash: keep working against
+    /// the copy while the instance that owned the original is torn down, so nothing it does from
+    /// then on - its shutdown flush, its background loop - can reach the bytes being reopened.
+    /// </summary>
+    public InMemoryStorage Clone()
+    {
+        var copy = new InMemoryStorage();
+        lock (_lock)
+        {
+            foreach (var (name, file) in _files)
+            {
+                copy.Replace(name, file.WrittenSpan);
+            }
+        }
+        return copy;
+    }
 
     public IReadOnlyCollection<string> FileNames
     {
@@ -72,7 +89,7 @@ public sealed class InMemoryStorage : IStorage
     {
         lock (_lock)
         {
-            return _files.TryGetValue(name, out var data) ? data.ToArray() : null;
+            return _files.TryGetValue(name, out var file) ? file.ToArray() : null;
         }
     }
 
@@ -80,7 +97,14 @@ public sealed class InMemoryStorage : IStorage
     {
         lock (_lock)
         {
-            _files[name] = data.ToArray();
+            Replace(name, data);
         }
+    }
+
+    private void Replace(string name, ReadOnlySpan<byte> data)
+    {
+        var file = new BufferWriter(Math.Max(16, data.Length));
+        file.WriteRaw(data);
+        _files[name] = file;
     }
 }

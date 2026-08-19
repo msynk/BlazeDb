@@ -19,11 +19,14 @@ public class IndexSelectionTests
         return (test, test.CreateContext());
     }
 
-    private static QueryPlan PlanFor(TestDatabase test, IQueryable<Person> query)
+    private static QueryPlan PlanFor<TEntity>(TestDatabase test, PeopleContext context, IQueryable<TEntity> query) =>
+        TranslateFor(test, context, query).Plan;
+
+    private static TranslatedQuery TranslateFor<TEntity>(TestDatabase test, PeopleContext context, IQueryable<TEntity> query)
     {
-        var binding = BlazeDbTableResolver.CreateBinding(test.Database, Person.Table);
+        var binding = BlazeDbTableResolver.CreateBinding(test.Database, context.Model.FindEntityType(typeof(TEntity))!);
         var prepared = QueryPreparer.Prepare(query.Expression, out _);
-        return QueryTranslator.Translate(prepared, binding, typeof(Person)).Plan;
+        return QueryTranslator.Translate(prepared, binding, typeof(TEntity));
     }
 
     [Fact]
@@ -33,7 +36,7 @@ public class IndexSelectionTests
         await using var owned = test;
         using var session = context;
 
-        var plan = PlanFor(test, context.People.Where(p => p.City == "London"));
+        var plan = PlanFor(test, context, context.People.Where(p => p.City == "London"));
 
         Assert.Equal("City", plan.IndexName);
     }
@@ -45,7 +48,7 @@ public class IndexSelectionTests
         await using var owned = test;
         using var session = context;
 
-        var plan = PlanFor(test, context.People.Where(p => "London" == p.City));
+        var plan = PlanFor(test, context, context.People.Where(p => "London" == p.City));
 
         Assert.Equal("City", plan.IndexName);
     }
@@ -57,7 +60,7 @@ public class IndexSelectionTests
         await using var owned = test;
         using var session = context;
 
-        var plan = PlanFor(test, context.People.Where(p => p.Age >= 40 && p.Age <= 50));
+        var plan = PlanFor(test, context, context.People.Where(p => p.Age >= 40 && p.Age <= 50));
 
         Assert.Equal("Age", plan.IndexName);
     }
@@ -69,7 +72,7 @@ public class IndexSelectionTests
         await using var owned = test;
         using var session = context;
 
-        var plan = PlanFor(test, context.People.Where(p => p.City == "London" && p.Age == 36));
+        var plan = PlanFor(test, context, context.People.Where(p => p.City == "London" && p.Age == 36));
 
         Assert.Equal("CityAge", plan.IndexName);
     }
@@ -81,7 +84,7 @@ public class IndexSelectionTests
         await using var owned = test;
         using var session = context;
 
-        var plan = PlanFor(test, context.People.OrderBy(p => p.Age));
+        var plan = PlanFor(test, context, context.People.OrderBy(p => p.Age));
 
         Assert.Equal("Age", plan.IndexName);
         Assert.True(plan.IndexProvidesOrder);
@@ -95,7 +98,7 @@ public class IndexSelectionTests
         await using var owned = test;
         using var session = context;
 
-        var plan = PlanFor(test, context.People.Where(p => p.Name == "Ada"));
+        var plan = PlanFor(test, context, context.People.Where(p => p.Name == "Ada"));
 
         Assert.Null(plan.IndexName);
     }
@@ -107,7 +110,7 @@ public class IndexSelectionTests
         await using var owned = test;
         using var session = context;
 
-        var plan = PlanFor(test, context.People.Skip(2).Take(3));
+        var plan = PlanFor(test, context, context.People.Skip(2).Take(3));
 
         Assert.Equal(2, plan.Skip);
         Assert.Equal(3, plan.Take);
@@ -122,10 +125,7 @@ public class IndexSelectionTests
 
         // Filtering after a Take means something different from filtering before it, so the plan
         // has to stop consuming at the Take and let the rest run over its results.
-        var binding = BlazeDbTableResolver.CreateBinding(test.Database, Person.Table);
-        var query = context.People.Take(2).Where(p => p.City == "London");
-        var translated = QueryTranslator.Translate(
-            QueryPreparer.Prepare(query.Expression, out _), binding, typeof(Person));
+        var translated = TranslateFor(test, context, context.People.Take(2).Where(p => p.City == "London"));
 
         Assert.Equal(2, translated.Plan.Take);
         Assert.NotNull(translated.Remainder);
@@ -219,7 +219,7 @@ public class IndexSelectionTests
 
         // Nulls are not indexed, so a null-valued lookup has to fall back to a scan or it would
         // silently return nothing.
-        var plan = PlanFor(test, context.People.Where(p => p.Email == null));
+        var plan = PlanFor(test, context, context.People.Where(p => p.Email == null));
         Assert.Null(plan.IndexName);
         Assert.Single(context.People.Where(p => p.Email == null).ToList());
     }
@@ -232,5 +232,219 @@ public class IndexSelectionTests
 
         Assert.True(ExpressionEvaluator.TryEvaluate(expression.Body, out var value));
         Assert.Equal(42, value);
+    }
+
+    [Fact]
+    public void The_Translator_Evaluates_Row_Independent_Expressions_But_Not_Row_Dependent_Ones()
+    {
+        var (a, b) = (3, 9);
+        Expression<Func<int>> independent = () => Math.Max(a, b) + 1;
+        Expression<Func<Person, int>> dependent = p => Math.Max(p.Age, b);
+
+        Assert.True(ExpressionEvaluator.TryEvaluate(independent.Body, out var value));
+        Assert.Equal(10, value);
+        Assert.False(ExpressionEvaluator.TryEvaluate(dependent.Body, out _));
+    }
+
+    [Fact]
+    public async Task A_Computed_Value_Still_Drives_An_Index()
+    {
+        var (test, context) = await OpenAsync();
+        await using var owned = test;
+        using var session = context;
+
+        var (lo, hi) = (10, 30);
+        var plan = PlanFor(test, context, context.People.Where(p => p.Age >= Math.Max(lo, hi)));
+
+        Assert.Equal("Age", plan.IndexName);
+    }
+
+    [Fact]
+    public async Task Equality_On_The_Primary_Key_Reads_The_Key_Dictionary()
+    {
+        var (test, context) = await OpenAsync();
+        await using var owned = test;
+        using var session = context;
+
+        test.People.Insert(new Person { Id = 1, Name = "a", City = "X", Age = 1, Email = "a@x.com" });
+        test.People.Insert(new Person { Id = 2, Name = "b", City = "X", Age = 2, Email = "b@x.com" });
+
+        var id = 2;
+        var plan = PlanFor(test, context, context.People.Where(p => p.Id == id && p.City == "X"));
+
+        Assert.True(plan.UsesPrimaryKey);
+        Assert.Null(plan.IndexName);
+        Assert.Equal("b", context.People.Single(p => p.Id == id && p.City == "X").Name);
+        Assert.Null(context.People.SingleOrDefault(p => p.Id == 3));
+        Assert.Equal("b", context.People.Find(2)!.Name);
+
+        // Find on an entity the context has not seen goes through the query pipeline, where EF
+        // spells the key as EF.Property<T>(e, "Id"); that must land on the key dictionary too.
+        using var fresh = test.CreateContext();
+        Assert.Equal("a", fresh.People.Find(1)!.Name);
+        Assert.Null(fresh.People.Find(42));
+    }
+
+    [Fact]
+    public async Task A_Key_Declared_With_The_Engine_Attribute_Is_The_Primary_Key()
+    {
+        var (test, context) = await OpenAsync();
+        await using var owned = test;
+        using var session = context;
+
+        var tags = context.Model.FindEntityType(typeof(Tag))!;
+        Assert.Equal(["Slug"], tags.FindPrimaryKey()!.Properties.Select(p => p.Name));
+        Assert.Null(tags.FindProperty(nameof(Tag.Transient)));
+
+        test.Tags.Insert(new Tag { Slug = "wal", Kind = TagKind.Topic, Weight = 5 });
+        var plan = PlanFor(test, context, context.Tags.Where(t => t.Slug == "wal"));
+        Assert.True(plan.UsesPrimaryKey);
+        Assert.Equal("wal", context.Tags.Find("wal")!.Slug);
+    }
+
+    [Fact]
+    public async Task Predicate_Values_Are_Converted_To_The_Index_Key_Type()
+    {
+        var (test, context) = await OpenAsync();
+        await using var owned = test;
+        using var session = context;
+
+        test.Tags.Insert(new Tag { Slug = "ada", Kind = TagKind.Person, Weight = 9 });
+        test.Tags.Insert(new Tag { Slug = "wal", Kind = TagKind.Topic, Weight = 3 });
+        test.Tags.Insert(new Tag { Slug = "opfs", Kind = TagKind.Topic, Weight = 7 });
+
+        // C# compares the enum and the byte as ints, so the values in the tree are ints, not the
+        // types the indexes are keyed on.
+        var byKind = PlanFor(test, context, context.Tags.Where(t => t.Kind == TagKind.Topic));
+        Assert.Equal("Kind", byKind.IndexName);
+        Assert.Equal(["opfs", "wal"], context.Tags.Where(t => t.Kind == TagKind.Topic).Select(t => t.Slug).Order().ToList());
+
+        var byWeight = PlanFor(test, context, context.Tags.Where(t => t.Weight >= 5));
+        Assert.Equal("Weight", byWeight.IndexName);
+        Assert.Equal(["ada", "opfs"], context.Tags.Where(t => t.Weight >= 5).Select(t => t.Slug).Order().ToList());
+
+        // An integer that no enum member's underlying value can hold must not be truncated onto one.
+        var kindCode = 300;
+        var noSuchKind = PlanFor(test, context, context.Tags.Where(t => (int)t.Kind == kindCode));
+        Assert.Null(noSuchKind.IndexName);
+        Assert.Empty(context.Tags.Where(t => (int)t.Kind == kindCode).ToList());
+
+        // A value the key type cannot hold exactly is left to a residual filter, which is correct.
+        var limit = 300;
+        var overflow = PlanFor(test, context, context.Tags.Where(t => t.Weight >= limit));
+        Assert.Null(overflow.IndexName);
+        Assert.Empty(context.Tags.Where(t => t.Weight >= limit).ToList());
+    }
+
+    [Fact]
+    public async Task An_Ordering_On_The_Range_Member_Sets_The_Direction_Instead_Of_Sorting()
+    {
+        var (test, context) = await OpenAsync();
+        await using var owned = test;
+        using var session = context;
+
+        foreach (var age in (int[])[40, 10, 30, 20])
+        {
+            test.People.Insert(new Person { Id = age, Name = $"P{age}", City = "X", Age = age, Email = $"p{age}@x.com" });
+        }
+
+        var query = context.People.Where(p => p.Age >= 20).OrderByDescending(p => p.Age);
+        var plan = PlanFor(test, context, query);
+
+        Assert.Equal("Age", plan.IndexName);
+        Assert.True(plan.IndexProvidesOrder);
+        Assert.False(plan.HasOrdering);
+        Assert.Equal([40, 30, 20], query.Select(p => p.Age).ToList());
+    }
+
+    [Fact]
+    public async Task A_Where_After_An_OrderBy_Is_Still_Absorbed()
+    {
+        var (test, context) = await OpenAsync();
+        await using var owned = test;
+        using var session = context;
+
+        var translated = TranslateFor(test, context, context.People.OrderBy(p => p.Name).Where(p => p.City == "London").Take(3));
+
+        Assert.Null(translated.Remainder);
+        Assert.Equal("City", translated.Plan.IndexName);
+        Assert.Equal(3, translated.Plan.Take);
+    }
+
+    [Fact]
+    public async Task A_Membership_Test_On_The_Key_Or_An_Index_Becomes_A_Batch_Of_Lookups()
+    {
+        var (test, context) = await OpenAsync();
+        await using var owned = test;
+        using var session = context;
+
+        for (var i = 1; i <= 6; i++)
+        {
+            test.People.Insert(new Person
+            {
+                Id = i, Name = $"P{i}", City = i % 2 == 0 ? "London" : "Paris", Age = 20 + i,
+                Email = i == 3 ? null : $"p{i}@x.com",
+            });
+        }
+
+        // ids.Contains(p.Id): one dictionary probe per id, duplicates and misses ignored.
+        var ids = new List<int> { 2, 5, 5, 42 };
+        var byIds = PlanFor(test, context, context.People.Where(p => ids.Contains(p.Id)));
+        Assert.True(byIds.UsesPrimaryKey);
+        Assert.Equal([2, 5], context.People.Where(p => ids.Contains(p.Id)).Select(p => p.Id).Order().ToList());
+
+        // An inline array against a hash index becomes the union of its lookups.
+        var byCity = PlanFor(test, context, context.People.Where(p => new[] { "London", "Rome" }.Contains(p.City)));
+        Assert.Equal("City", byCity.IndexName);
+        Assert.Equal([2, 4, 6], context.People.Where(p => new[] { "London", "Rome" }.Contains(p.City)).Select(p => p.Id).Order().ToList());
+
+        // A null in the list must match rows whose value is null, which no index holds - so it scans.
+        var emails = new[] { "p1@x.com", null };
+        var withNull = PlanFor(test, context, context.People.Where(p => emails.Contains(p.Email)));
+        Assert.Null(withNull.IndexName);
+        Assert.Equal([1, 3], context.People.Where(p => emails.Contains(p.Email)).Select(p => p.Id).Order().ToList());
+
+        // A set with its own comparer may match values the (ordinal) index would not, so it scans.
+        var caseless = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "london" };
+        var custom = PlanFor(test, context, context.People.Where(p => caseless.Contains(p.City)));
+        Assert.Null(custom.IndexName);
+        Assert.Equal([2, 4, 6], context.People.Where(p => caseless.Contains(p.City)).Select(p => p.Id).Order().ToList());
+
+        // A substring test on a string is not membership.
+        var text = "P1P2";
+        var substring = PlanFor(test, context, context.People.Where(p => text.Contains(p.Name)));
+        Assert.Null(substring.IndexName);
+        Assert.Equal([1, 2], context.People.Where(p => text.Contains(p.Name)).Select(p => p.Id).Order().ToList());
+    }
+
+    [Fact]
+    public async Task Repeated_Paging_Operators_Compose_Correctly()
+    {
+        var (test, context) = await OpenAsync();
+        await using var owned = test;
+        using var session = context;
+
+        for (var i = 1; i <= 10; i++)
+        {
+            test.People.Insert(new Person { Id = i, Name = $"P{i}", City = "X", Age = i, Email = $"p{i}@x.com" });
+        }
+
+        var skips = TranslateFor(test, context, context.People.OrderBy(p => p.Age).Skip(2).Skip(3));
+        Assert.Equal(5, skips.Plan.Skip);
+        Assert.Null(skips.Remainder);
+
+        var takes = TranslateFor(test, context, context.People.OrderBy(p => p.Age).Take(5).Take(2));
+        Assert.Equal(2, takes.Plan.Take);
+        Assert.Null(takes.Remainder);
+
+        // A Skip after a Take reorders the paging and cannot be folded into the plan.
+        var takeThenSkip = TranslateFor(test, context, context.People.OrderBy(p => p.Age).Take(5).Skip(2));
+        Assert.Equal(5, takeThenSkip.Plan.Take);
+        Assert.Equal(0, takeThenSkip.Plan.Skip);
+        Assert.NotNull(takeThenSkip.Remainder);
+
+        Assert.Equal([6, 7, 8, 9, 10], context.People.OrderBy(p => p.Age).Skip(2).Skip(3).Select(p => p.Age).ToList());
+        Assert.Equal([1, 2], context.People.OrderBy(p => p.Age).Take(5).Take(2).Select(p => p.Age).ToList());
+        Assert.Equal([3, 4, 5], context.People.OrderBy(p => p.Age).Take(5).Skip(2).Select(p => p.Age).ToList());
     }
 }

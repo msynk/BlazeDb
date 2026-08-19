@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions.Infrastructure;
@@ -112,8 +113,40 @@ public sealed class BlazeDbConventionSetBuilder : ProviderConventionSetBuilder
     public override ConventionSet CreateConventionSet()
     {
         var conventionSet = base.CreateConventionSet();
+        conventionSet.Add(new BlazeDbAttributeConvention());
         conventionSet.Add(new NoValueGenerationConvention());
         return conventionSet;
+    }
+
+    /// <summary>
+    /// Reads the engine's own attributes into the model, so a table type needs no second set of
+    /// EF annotations: <c>[BlazeDb.Key]</c> names the primary key - which EF's conventions would
+    /// otherwise only find when it happens to be called <c>Id</c> - and <c>[BlazeDb.Ignore]</c>
+    /// keeps a property out of the entity type, matching what the serializer does with it.
+    /// </summary>
+    private sealed class BlazeDbAttributeConvention : IEntityTypeAddedConvention
+    {
+        public void ProcessEntityTypeAdded(
+            IConventionEntityTypeBuilder entityTypeBuilder, IConventionContext<IConventionEntityTypeBuilder> context)
+        {
+            var clrType = entityTypeBuilder.Metadata.ClrType;
+            foreach (var property in clrType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (property.IsDefined(typeof(IgnoreAttribute), inherit: true))
+                {
+                    entityTypeBuilder.Ignore(property.Name, fromDataAnnotation: true);
+                    continue;
+                }
+                if (property.IsDefined(typeof(KeyAttribute), inherit: true))
+                {
+                    var propertyBuilder = entityTypeBuilder.Property(property, fromDataAnnotation: true);
+                    if (propertyBuilder is not null)
+                    {
+                        entityTypeBuilder.PrimaryKey([propertyBuilder.Metadata], fromDataAnnotation: true);
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>

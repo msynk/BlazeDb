@@ -310,28 +310,32 @@
         StateHasChanged();
         await Task.Yield();
 
-        if (_db is not null)
+        try
         {
-            await _db.DisposeAsync();
+            if (_db is not null)
+            {
+                await _db.DisposeAsync();
+            }
+            if (_durable is not null)
+            {
+                await _durable.DisposeAsync();
+            }
+
+            _db = await DemoSandbox.OpenAsync();
+            _table = _db.GetTable(TodoEntry.Table);
+            DemoData.SeedForBench(_db, _table, _requestedRows, out _ids);
+            _rowCount = _table.Count;
+
+            _durableStorage = new InMemoryStorage();
+            _durable = await DemoSandbox.OpenAsync(_durableStorage, flushInterval: TimeSpan.FromMilliseconds(50));
         }
-        if (_durable is not null)
+        finally
         {
-            await _durable.DisposeAsync();
+            _busy = false;
+            _currentName = "";
+            StateHasChanged();
         }
-
-        _db = await DemoSandbox.OpenAsync();
-        _table = _db.GetTable(TodoEntry.Table);
-        DemoData.SeedForBench(_db, _table, _requestedRows, out _ids);
-        _rowCount = _table.Count;
-
-        _durableStorage = new InMemoryStorage();
-        _durable = await DemoSandbox.OpenAsync(_durableStorage, flushInterval: TimeSpan.FromMilliseconds(50));
-
-        _busy = false;
-        _currentName = "";
-        StateHasChanged();
     }
-
     // ------------------------------------------------------------- runner
 
     private async Task RunAllAsync()
@@ -347,9 +351,22 @@
         StateHasChanged();
         await Task.Yield();
 
-        var table = _table;
-        var ids = _ids;
-        var durableTable = _durable.GetTable(TodoEntry.Table);
+        try
+        {
+            await RunSuiteAsync(_table, _ids, _durable);
+        }
+        finally
+        {
+            _progress = 100;
+            _currentName = "";
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunSuiteAsync(Table<Guid, TodoEntry> table, Guid[] ids, Database durable)
+    {
+        var durableTable = durable.GetTable(TodoEntry.Table);
         var scale = _scale;
         // Writes grow the table permanently, so they scale more conservatively than reads.
         var writeScale = Math.Min(scale, 3);
@@ -465,15 +482,18 @@
             }
         });
 
-        await Step("Writes", "Update in place", "table.Update(row) with index fix-up", 50_000 * writeScale, ops =>
+        await Step("Writes", "Update (indexed value)", "table.Update(copy) with ordered-index fix-up", 50_000 * writeScale, ops =>
         {
             for (var i = 0; i < ops; i++)
             {
                 var id = ids[i % ids.Length];
                 if (table.TryGet(id, out var row))
                 {
-                    row.Effort = i % 120;
-                    table.Update(row);
+                    // Update takes a new instance so the table still holds the values its indexes
+                    // were built from; mutating `row` itself and passing it back is refused.
+                    var changed = row.Clone();
+                    changed.Effort = i % 120;
+                    table.Update(changed);
                 }
             }
         });
@@ -498,7 +518,7 @@
 
         await Step("Writes", "Insert with WAL, one transaction", "a single WAL record for the batch", 20_000 * writeScale, ops =>
         {
-            using var txn = _durable!.BeginTransaction();
+            using var txn = durable.BeginTransaction();
             for (var i = 0; i < ops; i++)
             {
                 durableTable.Insert(NewRow(i));
@@ -537,10 +557,6 @@
         await MeasureSpaceAsync();
 
         _sink = sink;
-        _progress = 100;
-        _currentName = "";
-        _busy = false;
-        StateHasChanged();
     }
 
     // Kept so the JIT cannot elide the benchmark bodies.
@@ -567,7 +583,12 @@
         await using var db = await DemoSandbox.OpenAsync(storage, flushInterval: TimeSpan.FromHours(1));
         var table = db.GetTable(TodoEntry.Table);
         var rows = Math.Min(_rowCount, 20_000);
-        DemoData.SeedForBench(db, table, rows, out _);
+        // One autocommit insert per row, so the WAL figure really is one record (header included)
+        // per insert - a single seeding transaction would share one header across all of them.
+        for (var i = 0; i < rows; i++)
+        {
+            table.Insert(NewRow(i));
+        }
 
         var writer = new BufferWriter(1024);
         long rowTotal = 0;

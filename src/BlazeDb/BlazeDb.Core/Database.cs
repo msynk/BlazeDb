@@ -44,6 +44,8 @@ public sealed class Database : IAsyncDisposable
     /// </summary>
     public static async ValueTask<Database> OpenAsync(DatabaseOptions options, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        options.Validate();
         var db = new Database(options) { IsReadOnly = options.ReadOnly };
         if (options.Storage is not null)
         {
@@ -64,6 +66,14 @@ public sealed class Database : IAsyncDisposable
     public async ValueTask ReloadAsync(CancellationToken cancellationToken = default)
     {
         CheckDisposed();
+        if (!IsReadOnly)
+        {
+            // The writer's memory is the newest state there is; rebuilding it from storage would
+            // silently drop every commit the flusher has not written yet.
+            throw new InvalidOperationException(
+                "ReloadAsync is for read-only replicas. This database holds the writer's state, " +
+                "which is already newer than anything on storage.");
+        }
         if (_wal is null)
         {
             return;
@@ -104,20 +114,35 @@ public sealed class Database : IAsyncDisposable
     /// Forces all buffered WAL commits to storage now (hard durability point). Without an
     /// explicit flush, durability lags commits by at most <see cref="DatabaseOptions.FlushInterval"/>.
     /// </summary>
-    public ValueTask FlushAsync(CancellationToken cancellationToken = default) =>
-        _wal?.FlushAsync(cancellationToken) ?? default;
+    public ValueTask FlushAsync(CancellationToken cancellationToken = default)
+    {
+        CheckDisposed();
+        return _wal?.FlushAsync(cancellationToken) ?? default;
+    }
+
+    /// <summary>
+    /// The error the most recent background flush or checkpoint failed with, or null when the last
+    /// one succeeded (or no storage is configured). Committed data is safe in memory and the flusher
+    /// keeps retrying; this exists so an application can show that durability is lagging - for
+    /// example after a quota refusal - without waiting for an explicit <see cref="FlushAsync"/>.
+    /// </summary>
+    public Exception? LastBackgroundError => _wal?.LastBackgroundError;
 
     /// <summary>
     /// How much of the origin's storage allowance is in use, or null when the backend cannot
     /// report it (everything except the browser backends). Useful for showing headroom in a UI
     /// before the engine has to refuse a flush.
     /// </summary>
-    public ValueTask<StorageQuota?> GetStorageQuotaAsync(CancellationToken cancellationToken = default) =>
-        _wal?.GetQuotaAsync(cancellationToken) ?? default;
+    public ValueTask<StorageQuota?> GetStorageQuotaAsync(CancellationToken cancellationToken = default)
+    {
+        CheckDisposed();
+        return _wal?.GetQuotaAsync(cancellationToken) ?? default;
+    }
 
     /// <summary>Writes a full snapshot and truncates the WAL (compaction).</summary>
     public async ValueTask CheckpointAsync(CancellationToken cancellationToken = default)
     {
+        CheckDisposed();
         if (_wal is not null)
         {
             await _wal.CheckpointAsync(cancellationToken).ConfigureAwait(false);
@@ -164,10 +189,19 @@ public sealed class Database : IAsyncDisposable
         }
     }
 
-    internal void ApplyWrite(ITxnOp op)
+    /// <summary>
+    /// The pre-flight checks every write makes, exposed so a table can run them before it touches
+    /// its own state on the paths that have to adjust the row map ahead of the write itself.
+    /// </summary>
+    internal void EnsureWritable()
     {
         CheckDisposed();
         CheckWritable();
+    }
+
+    internal void ApplyWrite(ITxnOp op)
+    {
+        EnsureWritable();
         lock (SyncRoot)
         {
             op.Apply();
@@ -175,11 +209,24 @@ public sealed class Database : IAsyncDisposable
             {
                 _activeTransaction.Record(op);
             }
-            else
+            else if (_wal is not null)
             {
                 _singleOpScratch[0] = op;
-                _wal?.AppendCommit(_singleOpScratch);
-                _singleOpScratch[0] = null!;
+                try
+                {
+                    _wal.AppendCommit(_singleOpScratch);
+                }
+                catch
+                {
+                    // Memory must never run ahead of what the log will replay: an autocommit
+                    // write that could not be journaled is undone rather than left in place.
+                    op.Revert();
+                    throw;
+                }
+                finally
+                {
+                    _singleOpScratch[0] = null!;
+                }
             }
         }
     }

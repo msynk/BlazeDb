@@ -78,6 +78,10 @@ export async function writeAtomic(directory, name, bytes) {
   await writable.close();
 }
 
+// On the main thread the only writable API is createWritable(), which stages the whole file in a
+// swap copy and swaps it in on close(). An append is therefore an atomic rewrite whose cost grows
+// with the WAL - fine at the default checkpoint size, and the reason the engine compacts the log
+// rather than letting it grow. (Sync access handles would avoid the copy but exist only in workers.)
 export async function appendFile(directory, name, bytes) {
   const handle = await directory.getFileHandle(name, { create: true });
   const file = await handle.getFile();

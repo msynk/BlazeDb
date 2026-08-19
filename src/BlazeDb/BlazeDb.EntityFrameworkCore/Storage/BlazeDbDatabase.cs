@@ -56,12 +56,6 @@ internal sealed class BlazeDbDatabase : IDatabase
         }
 
         transaction.Commit();
-
-        foreach (var entry in entries)
-        {
-            entry.EntityState = entry.EntityState == EntityState.Deleted ? EntityState.Detached : EntityState.Unchanged;
-        }
-
         return count;
     }
 

@@ -58,6 +58,15 @@ internal interface IIndexStore<TRow>
     void ValidateUnique(TRow row, long replacedSeq, string tableName);
 
     /// <summary>
+    /// Whether the entry this store holds for <paramref name="seq"/> still matches the indexed
+    /// value <paramref name="row"/> currently carries. False means the row instance was mutated
+    /// after it was indexed, so the entry can no longer be found through the row's own values.
+    /// Returns true when the current value is null, since null values are never indexed and there
+    /// is nothing to check against.
+    /// </summary>
+    bool EntryMatches(TRow row, long seq);
+
+    /// <summary>
     /// Equality lookup with the key passed as <see cref="object"/>. For callers that pick an index
     /// at runtime - the EF Core provider translating a LINQ predicate - and so cannot name the key
     /// type. The cast happens inside the already-instantiated generic store, so no reflection or

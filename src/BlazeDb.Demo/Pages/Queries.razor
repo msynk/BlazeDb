@@ -443,6 +443,10 @@ else
             return;
         }
 
+        // The inputs are numeric fields; the engine rejects negative paging, so clamp what the user typed.
+        _skip = Math.Max(0, _skip);
+        _take = Math.Clamp(_take, 0, 50);
+
         var sw = Stopwatch.StartNew();
         var lines = new List<string>();
         _predicateCount = 0;

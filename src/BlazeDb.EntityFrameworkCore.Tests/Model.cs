@@ -47,4 +47,34 @@ public sealed class PeopleContext : DbContext
     public DbSet<Person> People => Set<Person>();
 
     public DbSet<Order> Orders => Set<Order>();
+
+    public DbSet<Tag> Tags => Set<Tag>();
+}
+
+public enum TagKind : byte
+{
+    Topic,
+    Person,
+    Place,
+}
+
+/// <summary>
+/// A table whose key is not called <c>Id</c>, with an enum and a narrow integer under its indexes
+/// and a property the serializer ignores - the shapes that need the provider to read BlazeDb's own
+/// attributes and to convert predicate values before handing them to an index.
+/// </summary>
+[Table("tags")]
+public partial class Tag
+{
+    [Key]
+    public string Slug { get; set; } = "";
+
+    [Index]
+    public TagKind Kind { get; set; }
+
+    [OrderedIndex]
+    public byte Weight { get; set; }
+
+    [Ignore]
+    public string Transient { get; set; } = "";
 }

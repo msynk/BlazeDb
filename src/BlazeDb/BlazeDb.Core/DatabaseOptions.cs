@@ -56,7 +56,31 @@ public sealed class DatabaseOptions
 
     public DatabaseOptions AddTable(TableDescriptor descriptor)
     {
+        ArgumentNullException.ThrowIfNull(descriptor);
         Tables.Add(descriptor);
         return this;
+    }
+
+    /// <summary>Rejects settings the engine cannot run with, before anything is opened or recovered.</summary>
+    internal void Validate()
+    {
+        // The upper bound is the timer's: PeriodicTimer accepts at most uint.MaxValue - 1 milliseconds.
+        if (FlushInterval <= TimeSpan.Zero || FlushInterval.TotalMilliseconds > uint.MaxValue - 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(FlushInterval), FlushInterval, "The flush interval must be positive and below ~49.7 days.");
+        }
+        if (CheckpointWalSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(CheckpointWalSize), CheckpointWalSize, "The checkpoint WAL size must be positive.");
+        }
+        if (QuotaReserveBytes < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(QuotaReserveBytes), QuotaReserveBytes, "The quota reserve cannot be negative.");
+        }
+        if (ReadOnly && Storage is null)
+        {
+            throw new ArgumentException("A read-only replica needs a storage backend to read from.", nameof(ReadOnly));
+        }
     }
 }

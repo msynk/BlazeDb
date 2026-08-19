@@ -87,41 +87,77 @@ public ref struct BufferReader
 
     public string ReadString()
     {
-        var length = checked((int)ReadVarUInt());
+        var length = ReadLength();
         return Encoding.UTF8.GetString(ReadRaw(length));
     }
 
     /// <summary>Reads a length-delimited byte block.</summary>
     public ReadOnlySpan<byte> ReadBytes()
     {
-        var length = checked((int)ReadVarUInt());
+        var length = ReadLength();
         return ReadRaw(length);
     }
 
-    public Guid ReadGuid() => new(ReadBytes());
+    public Guid ReadGuid() => new(ReadFixedBlock(16));
 
     public decimal ReadDecimal()
     {
-        var span = ReadBytes();
+        var span = ReadFixedBlock(16);
         Span<int> bits = stackalloc int[4];
         for (var i = 0; i < 4; i++)
         {
             bits[i] = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(i * 4));
         }
-        return new decimal(bits);
+        try
+        {
+            return new decimal(bits);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidDataException("Malformed decimal.", ex);
+        }
     }
 
-    public DateTime ReadDateTime() => DateTime.FromBinary((long)ReadFixed64());
+    public DateTime ReadDateTime()
+    {
+        var binary = (long)ReadFixed64();
+        try
+        {
+            return DateTime.FromBinary(binary);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidDataException("Malformed DateTime.", ex);
+        }
+    }
 
     public DateTimeOffset ReadDateTimeOffset()
     {
-        var span = ReadBytes();
+        var span = ReadFixedBlock(16);
         var ticks = BinaryPrimitives.ReadInt64LittleEndian(span);
         var offsetTicks = BinaryPrimitives.ReadInt64LittleEndian(span.Slice(8));
-        return new DateTimeOffset(ticks, new TimeSpan(offsetTicks));
+        try
+        {
+            return new DateTimeOffset(ticks, new TimeSpan(offsetTicks));
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidDataException("Malformed DateTimeOffset.", ex);
+        }
     }
 
     public TimeSpan ReadTimeSpan() => new((long)ReadFixed64());
+
+    /// <summary>A length prefix; anything longer than what remains is malformed, which also rules out overflow.</summary>
+    private int ReadLength()
+    {
+        var length = ReadVarUInt();
+        if (length > (ulong)Remaining)
+        {
+            throw new InvalidDataException("Length prefix exceeds the remaining buffer.");
+        }
+        return (int)length;
+    }
 
     public (int FieldNumber, WireType WireType) ReadTag()
     {
@@ -141,7 +177,7 @@ public ref struct BufferReader
                 ReadRaw(8);
                 break;
             case WireType.LengthDelimited:
-                ReadRaw(checked((int)ReadVarUInt()));
+                ReadRaw(ReadLength());
                 break;
             case WireType.Fixed32:
                 ReadRaw(4);
@@ -149,6 +185,21 @@ public ref struct BufferReader
             default:
                 throw new InvalidDataException($"Unknown wire type {wireType}.");
         }
+    }
+
+    /// <summary>
+    /// Reads a length-delimited block that must be exactly <paramref name="expected"/> bytes, so a
+    /// corrupt length surfaces as <see cref="InvalidDataException"/> like every other decode error
+    /// rather than as an argument error from the value constructor.
+    /// </summary>
+    private ReadOnlySpan<byte> ReadFixedBlock(int expected)
+    {
+        var block = ReadBytes();
+        if (block.Length != expected)
+        {
+            throw new InvalidDataException($"Expected a {expected}-byte value but the block is {block.Length} bytes.");
+        }
+        return block;
     }
 
     private readonly void CheckAvailable(int count)

@@ -67,7 +67,8 @@ internal static class SourceEmitter
         sb.AppendLine($"{indent}        __BlazeReadRow,");
         sb.AppendLine($"{indent}        __BlazeWriteKey,");
         sb.AppendLine($"{indent}        __BlazeReadKey,");
-        sb.AppendLine($"{indent}        {indexArg});");
+        sb.AppendLine($"{indent}        {indexArg},");
+        sb.AppendLine($"{indent}        keyMember: \"{key.Name}\");");
         sb.AppendLine();
 
         // Index definitions.
@@ -205,20 +206,22 @@ internal static class SourceEmitter
         {
             var local = "__v" + prop.FieldNumber;
             var read = TypeMap.ReadExpr(prop.Kind, "reader", prop.ScalarTypeDisplay);
+            // A field number that comes back with a different wire type than this reader expects
+            // was written by a schema in which the property had another type. Decoding it would
+            // misread the bytes (or worse, desynchronize the stream), so it is skipped like an
+            // unknown field and the property keeps its default - the same tolerance protobuf has.
+            sb.AppendLine($"{indent}                case {prop.FieldNumber} when __wire == {TypeMap.WireType(prop.Kind)}:");
             switch (prop.Category)
             {
                 case PropCategory.ListCollection:
                 case PropCategory.ArrayCollection:
-                    sb.AppendLine($"{indent}                case {prop.FieldNumber}:");
                     sb.AppendLine($"{indent}                    ({local} ??= new global::System.Collections.Generic.List<{prop.ScalarTypeDisplay}>()).Add({read});");
-                    sb.AppendLine($"{indent}                    break;");
                     break;
                 default:
-                    sb.AppendLine($"{indent}                case {prop.FieldNumber}:");
                     sb.AppendLine($"{indent}                    {local} = {read};");
-                    sb.AppendLine($"{indent}                    break;");
                     break;
             }
+            sb.AppendLine($"{indent}                    break;");
         }
         sb.AppendLine($"{indent}                default:");
         sb.AppendLine($"{indent}                    reader.SkipField(__wire);");

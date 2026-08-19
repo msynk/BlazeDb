@@ -144,4 +144,31 @@ public class SerializationTests
         }
         Assert.True(thrown);
     }
+
+    [Fact]
+    public void Fixed_Size_Blocks_With_The_Wrong_Length_Are_Reported_As_Invalid_Data()
+    {
+        // A Guid, decimal or DateTimeOffset is a 16-byte length-delimited block. A block of any
+        // other size is corruption and must surface as the decode error every other path throws,
+        // not as an argument error out of the value's constructor.
+        var writer = new BufferWriter();
+        writer.WriteBytes(new byte[7]);
+        var bytes = writer.ToArray();
+
+        Assert.Throws<InvalidDataException>(() =>
+        {
+            var reader = new BufferReader(bytes);
+            reader.ReadGuid();
+        });
+        Assert.Throws<InvalidDataException>(() =>
+        {
+            var reader = new BufferReader(bytes);
+            reader.ReadDecimal();
+        });
+        Assert.Throws<InvalidDataException>(() =>
+        {
+            var reader = new BufferReader(bytes);
+            reader.ReadDateTimeOffset();
+        });
+    }
 }

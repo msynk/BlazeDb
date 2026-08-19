@@ -8,9 +8,10 @@ namespace BlazeDb.EntityFrameworkCore.Query;
 ///
 /// The rules are deliberately shallow - there are no statistics to consult and every row is
 /// already in memory, so the win is asymptotic rather than marginal: an equality lookup or a range
-/// scan instead of touching every row. Preference runs compound equality first (most selective),
-/// then single-property equality, then a range, and finally an ordering that an ordered index can
-/// serve for free. Anything not turned into a source stays a residual filter.
+/// scan instead of touching every row. Preference runs primary-key equality (or membership) first,
+/// then compound equality (most selective index), then single-property equality or membership, then a range, and
+/// finally an ordering that an ordered index can serve for free. Anything not turned into a source
+/// stays a residual filter.
 /// </summary>
 internal static class IndexSelector
 {
@@ -32,16 +33,54 @@ internal static class IndexSelector
             .ToList();
 
         var used = new HashSet<int>();
+        string? rangeMember = null;
 
-        if (!TryCompoundEquality(plan, binding, comparisons, used) &&
+        if (!TryPrimaryKey(plan, binding, comparisons, used) &&
+            !TryCompoundEquality(plan, binding, comparisons, used) &&
             !TrySingleEquality(plan, binding, comparisons, used))
         {
-            TryRange(plan, binding, comparisons, used);
+            rangeMember = TryRange(plan, binding, comparisons, used);
         }
 
-        var orderingSatisfied = TrySatisfyOrdering(plan, binding, orderings);
+        var orderingSatisfied = TrySatisfyOrdering(plan, binding, orderings, rangeMember);
 
         return new IndexSelection(Conjuncts.Rebuild(conjuncts, used, parameter, predicates), orderingSatisfied);
+    }
+
+    private static bool TryPrimaryKey(
+        QueryPlan plan, IBlazeDbTableBinding binding, List<(int Index, Comparison? Comparison)> comparisons,
+        HashSet<int> used)
+    {
+        if (binding.KeyMember is null)
+        {
+            return false;
+        }
+        // Equality first: one probe beats a list of them, and a list is not tried when both appear.
+        foreach (var membership in (bool[])[false, true])
+        {
+            foreach (var (i, comparison) in comparisons)
+            {
+                if (comparison!.Member != binding.KeyMember || comparison.IsMembership != membership)
+                {
+                    continue;
+                }
+                if (membership)
+                {
+                    plan.UseKeys(comparison.InValues!);
+                }
+                else if (comparison.Operator == ExpressionType.Equal && comparison.Value is not null)
+                {
+                    plan.UseKey(comparison.Value);
+                }
+                else
+                {
+                    continue;
+                }
+                used.Add(i);
+                return true;
+            }
+        }
+        return false;
     }
 
     private static bool TryCompoundEquality(
@@ -70,9 +109,9 @@ internal static class IndexSelector
                 continue;
             }
 
-            // The engine indexes the tuple of the members, so the lookup key is that same tuple.
-            var tupleType = index.KeyType;
-            var key = Activator.CreateInstance(tupleType, matched.Select(m => m.Comparison.Value).ToArray());
+            // The engine indexes the tuple of the members, so the lookup key is that same tuple; each
+            // value already has its member's type, which is the type the tuple declares for it.
+            var key = Activator.CreateInstance(index.KeyType, matched.Select(m => m.Comparison.Value).ToArray());
             if (key is null)
             {
                 continue;
@@ -88,33 +127,46 @@ internal static class IndexSelector
         return false;
     }
 
+    /// <summary>
+    /// A single-property equality, or a membership list, against a hash index - or an ordered one,
+    /// which answers equality as a range of one key, still far better than a scan.
+    /// </summary>
     private static bool TrySingleEquality(
         QueryPlan plan, IBlazeDbTableBinding binding, List<(int Index, Comparison? Comparison)> comparisons,
         HashSet<int> used)
     {
-        foreach (var (i, comparison) in comparisons)
+        foreach (var membership in (bool[])[false, true])
         {
-            if (comparison!.Operator != ExpressionType.Equal || comparison.Value is null)
+            foreach (var (i, comparison) in comparisons)
             {
-                continue;
+                if (comparison!.IsMembership != membership ||
+                    (!membership && (comparison.Operator != ExpressionType.Equal || comparison.Value is null)))
+                {
+                    continue;
+                }
+                var index = Single(binding, comparison.Member, ordered: false)
+                            ?? Single(binding, comparison.Member, ordered: true);
+                if (index is null)
+                {
+                    continue;
+                }
+                if (membership)
+                {
+                    plan.UseEqualityIn(index, comparison.InValues!);
+                }
+                else
+                {
+                    plan.UseEquality(index, comparison.Value!);
+                }
+                used.Add(i);
+                return true;
             }
-            // A hash index answers equality in one step; an ordered index needs a range of one key,
-            // which is still far better than a scan, so it is the second choice.
-            var index = Single(binding, comparison.Member, ordered: false)
-                        ?? Single(binding, comparison.Member, ordered: true);
-            if (index is null)
-            {
-                continue;
-            }
-
-            plan.UseEquality(index, comparison.Value);
-            used.Add(i);
-            return true;
         }
         return false;
     }
 
-    private static void TryRange(
+    /// <summary>Returns the member the chosen range covers, or null when no range was chosen.</summary>
+    private static string? TryRange(
         QueryPlan plan, IBlazeDbTableBinding binding, List<(int Index, Comparison? Comparison)> comparisons,
         HashSet<int> used)
     {
@@ -128,20 +180,21 @@ internal static class IndexSelector
 
             object? from = null, to = null;
             bool hasFrom = false, hasTo = false;
+            var usedHere = new List<int>();
             foreach (var (i, comparison) in group)
             {
-                if (comparison!.Value is null)
+                if (comparison!.Value is not { } bound)
                 {
                     continue;
                 }
                 var lower = comparison.Operator is ExpressionType.GreaterThan or ExpressionType.GreaterThanOrEqual;
                 if (lower && !hasFrom)
                 {
-                    (hasFrom, from) = (true, comparison.Value);
+                    (hasFrom, from) = (true, bound);
                 }
                 else if (!lower && !hasTo)
                 {
-                    (hasTo, to) = (true, comparison.Value);
+                    (hasTo, to) = (true, bound);
                 }
                 else
                 {
@@ -152,24 +205,26 @@ internal static class IndexSelector
                 // conjunct as a residual filter that trims the boundary rows.
                 if (comparison.Operator is ExpressionType.GreaterThanOrEqual or ExpressionType.LessThanOrEqual)
                 {
-                    used.Add(i);
+                    usedHere.Add(i);
                 }
             }
 
             if (hasFrom || hasTo)
             {
                 plan.UseRange(index, hasFrom, from, hasTo, to, descending: false);
-                return;
+                used.UnionWith(usedHere);
+                return group.Key;
             }
         }
+        return null;
     }
 
     private static bool TrySatisfyOrdering(
-        QueryPlan plan, IBlazeDbTableBinding binding, List<MethodCallExpression> orderings)
+        QueryPlan plan, IBlazeDbTableBinding binding, List<MethodCallExpression> orderings, string? rangeMember)
     {
         // Only a single OrderBy can be answered by an index: a ThenBy would need the index to be
         // compound over exactly the same members, which the ordering syntax cannot express here.
-        if (orderings.Count != 1 || plan.HasIndexSource)
+        if (orderings.Count != 1)
         {
             return false;
         }
@@ -181,13 +236,26 @@ internal static class IndexSelector
             return false;
         }
 
+        var descending = call.Method.Name is nameof(Queryable.OrderByDescending);
+
+        if (plan.HasIndexSource)
+        {
+            // A range over the ordering's own member already walks the index in order; all that is
+            // left is to walk it in the requested direction instead of sorting afterwards.
+            if (rangeMember == member.Member.Name)
+            {
+                plan.SetRangeDirection(descending);
+                return true;
+            }
+            return false;
+        }
+
         var index = Single(binding, member.Member.Name, ordered: true);
         if (index is null)
         {
             return false;
         }
 
-        var descending = call.Method.Name is nameof(Queryable.OrderByDescending);
         plan.UseRange(index, hasFrom: false, null, hasTo: false, null, descending);
         return true;
     }
@@ -198,29 +266,51 @@ internal static class IndexSelector
 }
 
 internal sealed record IndexSelection(IReadOnlyList<LambdaExpression> Residual, bool OrderingSatisfied);
-
-/// <summary>One <c>row.Member op value</c> test, with the value already evaluated.</summary>
+/// <summary>
+/// One <c>row.Member op value</c> test (or <c>values.Contains(row.Member)</c>), with the value already
+/// evaluated and converted to the member's own type. C# widens the operands of a comparison before it
+/// is compared - <c>row.Kind == Kind.A</c> is really <c>(int)row.Kind == 0</c> - so the boxed value in
+/// the tree is often not of the property's type, and the engine's boxed index API unboxes exactly the
+/// index key type. Converting here, once, means no selector rule can hand an index a value of the wrong
+/// type; a value that cannot be converted losslessly yields no comparison, and the test stays a filter.
+/// </summary>
 internal sealed class Comparison
 {
-    private Comparison(string member, ExpressionType op, object? value)
+    private Comparison(string member, ExpressionType op, object? value, IReadOnlyList<object>? inValues = null)
     {
         Member = member;
         Operator = op;
         Value = value;
+        InValues = inValues;
     }
 
     public string Member { get; }
 
+    /// <summary>The operator, or <see cref="ExpressionType.Call"/> for a membership test.</summary>
     public ExpressionType Operator { get; }
 
+    /// <summary>The value, of the member's type; null only for a comparison against null.</summary>
     public object? Value { get; }
+
+    /// <summary>For <c>values.Contains(row.Member)</c>: the distinct non-null values, of the member's type.</summary>
+    public IReadOnlyList<object>? InValues { get; }
+
+    public bool IsMembership => InValues is not null;
 
     public bool IsRange => Operator is ExpressionType.GreaterThan or ExpressionType.GreaterThanOrEqual
         or ExpressionType.LessThan or ExpressionType.LessThanOrEqual;
 
     public static Comparison? TryRead(Expression conjunct, ParameterExpression? parameter)
     {
-        if (parameter is null || conjunct is not BinaryExpression binary)
+        if (parameter is null)
+        {
+            return null;
+        }
+        if (conjunct is MethodCallExpression call)
+        {
+            return TryReadMembership(call, parameter);
+        }
+        if (conjunct is not BinaryExpression binary)
         {
             return null;
         }
@@ -231,20 +321,105 @@ internal sealed class Comparison
             return null;
         }
 
-        if (TryMember(binary.Left, parameter, out var member) &&
+        if (TryMember(binary.Left, parameter, out var member, out var memberType) &&
             ExpressionEvaluator.TryEvaluate(binary.Right, out var value))
         {
-            return new Comparison(member, op, value);
+            return Create(member, op, value, memberType);
         }
-        if (TryMember(binary.Right, parameter, out member) &&
+        if (TryMember(binary.Right, parameter, out member, out memberType) &&
             ExpressionEvaluator.TryEvaluate(binary.Left, out value))
         {
-            return new Comparison(member, Mirror(op), value);
+            return Create(member, Mirror(op), value, memberType);
         }
         return null;
     }
 
-    private static bool TryMember(Expression expression, ParameterExpression parameter, out string member)
+    private static Comparison? Create(string member, ExpressionType op, object? value, Type memberType)
+    {
+        if (value is null)
+        {
+            return new Comparison(member, op, null);
+        }
+        return KeyCoercion.TryCoerce(value, memberType, out var coerced) ? new Comparison(member, op, coerced) : null;
+    }
+
+    /// <summary>
+    /// Reads <c>values.Contains(row.Member)</c> - the static <c>Enumerable.Contains</c> or an instance
+    /// <c>Contains</c> on a list, set or array - when the values do not depend on the row. A string
+    /// receiver is left alone (<c>text.Contains(row.Letter)</c> is a substring test), and so is a set
+    /// with its own comparer, which may match values an index keyed on the default comparer would not.
+    /// A null in the list would match rows whose value is null, which no index holds, so that too
+    /// stays a filter.
+    /// </summary>
+    private static Comparison? TryReadMembership(MethodCallExpression call, ParameterExpression parameter)
+    {
+        if (call.Method.Name != nameof(Enumerable.Contains))
+        {
+            return null;
+        }
+        Expression source, item;
+        if (call.Object is null && call.Arguments.Count == 2)
+        {
+            (source, item) = (call.Arguments[0], call.Arguments[1]);
+        }
+        else if (call.Object is not null && call.Arguments.Count == 1)
+        {
+            (source, item) = (call.Object, call.Arguments[0]);
+        }
+        else
+        {
+            return null;
+        }
+
+        if (!TryMember(item, parameter, out var member, out var memberType) ||
+            !ExpressionEvaluator.TryEvaluate(source, out var evaluated) ||
+            evaluated is not System.Collections.IEnumerable values || evaluated is string ||
+            UsesCustomComparer(evaluated))
+        {
+            return null;
+        }
+
+        var keys = new List<object>();
+        var seen = new HashSet<object>();
+        foreach (var value in values)
+        {
+            if (!KeyCoercion.TryCoerce(value, memberType, out var key))
+            {
+                return null;
+            }
+            if (seen.Add(key))
+            {
+                keys.Add(key);
+            }
+        }
+        return new Comparison(member, ExpressionType.Call, null, keys);
+    }
+
+    /// <summary>
+    /// True when the collection carries a comparer other than the default one for its element type -
+    /// a HashSet with an ignore-case comparer, a SortedSet with a custom ordering - so its Contains
+    /// answers a different question than an index lookup on the raw value would.
+    /// </summary>
+    private static bool UsesCustomComparer(object collection)
+    {
+        var comparerProperty = collection.GetType().GetProperty("Comparer");
+        if (comparerProperty?.GetValue(collection) is not { } comparer)
+        {
+            return false;
+        }
+        var elementType = collection.GetType().GetInterfaces()
+            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+            ?.GetGenericArguments()[0];
+        if (elementType is null)
+        {
+            return true;
+        }
+        var defaultEquality = typeof(EqualityComparer<>).MakeGenericType(elementType).GetProperty("Default")!.GetValue(null);
+        var defaultOrder = typeof(Comparer<>).MakeGenericType(elementType).GetProperty("Default")!.GetValue(null);
+        return !Equals(comparer, defaultEquality) && !Equals(comparer, defaultOrder);
+    }
+
+    private static bool TryMember(Expression expression, ParameterExpression parameter, out string member, out Type memberType)
     {
         var current = StripQuotes(expression);
         while (current is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert)
@@ -254,9 +429,11 @@ internal sealed class Comparison
         if (current is MemberExpression access && access.Expression == parameter)
         {
             member = access.Member.Name;
+            memberType = access.Type;
             return true;
         }
         member = string.Empty;
+        memberType = typeof(object);
         return false;
     }
 

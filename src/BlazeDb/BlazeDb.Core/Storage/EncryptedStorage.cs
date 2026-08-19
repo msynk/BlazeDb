@@ -20,7 +20,7 @@ namespace BlazeDb.Storage;
 /// corruption rather than silently skipped.
 /// </para>
 /// </summary>
-public sealed class EncryptedStorage : IStorage, IDisposable
+public sealed class EncryptedStorage : IQuotaAwareStorage, IDisposable
 {
     private const byte FormatVersion = 1;
     private const int LengthPrefixSize = sizeof(int);
@@ -155,6 +155,13 @@ public sealed class EncryptedStorage : IStorage, IDisposable
 
     public ValueTask DeleteAsync(string name, CancellationToken cancellationToken = default) =>
         _inner.DeleteAsync(name, cancellationToken);
+
+    /// <summary>
+    /// Passes the wrapped backend's estimate through, so encrypting a browser database does not
+    /// cost it the engine's quota handling. Null when the backend cannot report usage.
+    /// </summary>
+    public ValueTask<StorageQuota?> GetQuotaAsync(CancellationToken cancellationToken = default) =>
+        _inner is IQuotaAwareStorage quotaAware ? quotaAware.GetQuotaAsync(cancellationToken) : default;
 
     private async ValueTask<byte[]> SealAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
     {

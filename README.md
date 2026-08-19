@@ -78,6 +78,13 @@ using (var txn = db.BeginTransaction())
 await db.FlushAsync(); // force durability now (otherwise flushed in the background)
 ```
 
+Rows are live objects - a read hands back the instance the table holds. `Update` therefore takes a
+*new* instance (as above): the table retracts the old index entries through the values of the row it
+currently holds, so mutating that instance's indexed properties and passing it back is refused
+rather than left to strand index entries. To write a row that was changed in place, hand the table
+the values it had: `todos.UpdateInPlace(row, previousValues)` / `todos.DeleteInPlace(key,
+previousValues)` - which is what the EF Core provider does with the change tracker's originals.
+
 Streaming a large result set without blocking the browser's only thread:
 
 ```csharp
@@ -119,6 +126,11 @@ var options = new DatabaseOptions
 var quota = await db.GetStorageQuotaAsync();   // null when the backend cannot say
 await OpfsStorage.RequestPersistenceAsync();   // ask not to be evicted
 ```
+
+Wrapping a browser backend in `EncryptedStorage` keeps its quota awareness. When a background
+flush is refused (or fails for any other reason) the data stays committed in memory and the flusher
+keeps retrying; `db.LastBackgroundError` reports the standing failure so a UI can say durability is
+lagging, and clears again once a flush succeeds.
 
 ### Multiple tabs
 
@@ -181,12 +193,17 @@ from anything EF does:
 - **`SaveChanges` is a memory operation.** It returns as soon as the transaction commits; the log
   reaches storage on the flush interval, or immediately if you call `db.FlushAsync()`.
 
-LINQ is translated as far as the engine's plan model reaches: an index source chosen from equality,
-range and ordering predicates, then filters, ordering and paging. Everything else - projections,
-grouping, aggregates, joins between local sequences - runs as LINQ to Objects over the rows the plan
-returned, which costs nothing extra because those rows are already objects. The exception is
-`Include`: BlazeDb rows have no navigations, so relationships are modelled as key properties and
-queried against the other table directly.
+The model comes from the same attributes the engine uses: `[Key]` names the primary key whatever it
+is called, and `[Ignore]` keeps a property out of the entity type as well as out of the row bytes.
+
+LINQ is translated as far as the engine's plan model reaches: a source chosen from the predicates -
+the primary-key dictionary for `Where(t => t.Id == id)`, `ids.Contains(t.Id)` and `Find(id)`, a
+compound or single-property index for equalities and `Contains` lists, an ordered index for ranges
+and `OrderBy` - then filters, ordering and paging.
+Everything else - projections, grouping, aggregates, joins between local sequences - runs as LINQ to
+Objects over the rows the plan returned, which costs nothing extra because those rows are already
+objects. The exception is `Include`: BlazeDb rows have no navigations, so relationships are modelled
+as key properties and queried against the other table directly.
 
 ## Performance
 

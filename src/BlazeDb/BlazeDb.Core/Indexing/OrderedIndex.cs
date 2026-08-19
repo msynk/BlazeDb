@@ -115,6 +115,12 @@ internal sealed class OrderedIndexStore<TRow, TIndexKey> : IIndexStore<TRow>
         }
     }
 
+    public bool EntryMatches(TRow row, long seq)
+    {
+        var key = _definition.Selector(row);
+        return key is null || _entries.Contains(new Entry(key, seq, default));
+    }
+
     /// <summary>All rows in index order (ascending or descending).</summary>
     public IEnumerable<TRow> All(bool descending)
     {

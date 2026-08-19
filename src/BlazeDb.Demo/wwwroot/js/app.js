@@ -49,16 +49,3 @@ export async function copyText(text) {
 export function scrollToTop() {
     window.scrollTo({ top: 0, behavior: 'auto' });
 }
-
-// Rough persisted-bytes estimate, purely informational for the storage page.
-export async function storageEstimate() {
-    try {
-        if (navigator.storage && navigator.storage.estimate) {
-            const e = await navigator.storage.estimate();
-            return { usage: e.usage ?? -1, quota: e.quota ?? -1 };
-        }
-    } catch (e) {
-        // ignored
-    }
-    return { usage: -1, quota: -1 };
-}

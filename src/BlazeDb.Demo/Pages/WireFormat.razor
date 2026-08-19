@@ -354,9 +354,9 @@
         Weight = 3.5,
         Duration = TimeSpan.FromMinutes(_effort),
         DueAt = new DateTimeOffset(2026, 8, 24, 0, 0, 0, TimeSpan.Zero),
-        Tags = Enumerable.Range(1, _tagCount).Select(i => $"tag{i}").ToList(),
+        Tags = Enumerable.Range(1, Math.Clamp(_tagCount, 0, 6)).Select(i => $"tag{i}").ToList(),
         Scores = [88, 91],
-        Payload = Enumerable.Range(0, _payloadSize).Select(i => (byte)(0xB0 + i)).ToArray(),
+        Payload = Enumerable.Range(0, Math.Clamp(_payloadSize, 0, 16)).Select(i => (byte)(0xB0 + i)).ToArray(),
         Transient = "this string is never written",
     };
 

@@ -24,7 +24,7 @@ internal static class QueryTranslator
         var predicates = new List<LambdaExpression>();
         var orderings = new List<MethodCallExpression>();
         var consumed = 0;
-        var stage = Stage.Filter;
+        var stage = Stage.Shape;
 
         foreach (var call in chain)
         {
@@ -57,11 +57,13 @@ internal static class QueryTranslator
                     break;
 
                 case nameof(Queryable.Skip):
-                    if (!TryConstantInt(call.Arguments[1], out var skip))
+                    // A Skip after a Take changes which rows the Take applies to; the plan applies
+                    // Skip first, so it cannot absorb one. Consecutive Skips add up.
+                    if (plan.Take >= 0 || !TryConstantInt(call.Arguments[1], out var skip))
                     {
                         goto done;
                     }
-                    plan.Skip = skip;
+                    plan.Skip = (int)Math.Min((long)plan.Skip + Math.Max(0, skip), int.MaxValue);
                     break;
 
                 case nameof(Queryable.Take):
@@ -69,7 +71,10 @@ internal static class QueryTranslator
                     {
                         goto done;
                     }
-                    plan.Take = take;
+                    // LINQ treats a negative count as zero; the plan uses -1 for "no limit", and
+                    // a second Take can only shrink the first.
+                    take = Math.Max(0, take);
+                    plan.Take = plan.Take < 0 ? take : Math.Min(plan.Take, take);
                     break;
 
                 default:
@@ -100,23 +105,24 @@ internal static class QueryTranslator
     }
 
     /// <summary>
-    /// Operator phases, in the order the engine applies them. A chain is only consumed while it
-    /// stays in this order: <c>Take(5).Where(...)</c> does not mean the same thing as
-    /// <c>Where(...).Take(5)</c>, so the <c>Where</c> is left for the fallback.
+    /// Operator bands, in the order the engine applies them. A chain is only consumed while it does
+    /// not go back a band: filtering and sorting commute with each other (a plan filters, then sorts,
+    /// whichever way they were written) so they share one band, but paging pins the order of what
+    /// follows - <c>Take(5).Where(...)</c> does not mean <c>Where(...).Take(5)</c> - so a filter or
+    /// sort after paging is left for the fallback.
     /// </summary>
     private enum Stage
     {
-        Filter = 0,
-        Sort = 1,
-        Page = 2,
+        Shape = 0,
+        Page = 1,
     }
 
     private static Stage? StageOf(string methodName) => methodName switch
     {
-        nameof(Queryable.Where) => Stage.Filter,
-        nameof(Queryable.OrderBy) or nameof(Queryable.OrderByDescending) => Stage.Sort,
-        // ThenBy stays in the sort phase; ordering the plan already has is composed onto.
-        nameof(Queryable.ThenBy) or nameof(Queryable.ThenByDescending) => Stage.Sort,
+        nameof(Queryable.Where) => Stage.Shape,
+        nameof(Queryable.OrderBy) or nameof(Queryable.OrderByDescending) => Stage.Shape,
+        // ThenBy composes onto the ordering the plan already has.
+        nameof(Queryable.ThenBy) or nameof(Queryable.ThenByDescending) => Stage.Shape,
         nameof(Queryable.Skip) or nameof(Queryable.Take) => Stage.Page,
         _ => null,
     };
@@ -220,7 +226,9 @@ internal sealed class RowsPlaceholderReplacer : ExpressionVisitor
 /// <summary>
 /// Evaluates the closed-over parts of a query - a captured variable, a constant, a field of a
 /// closure. LINQ trees carry these as member accesses over a display class, and reading them
-/// directly avoids compiling an expression just to learn a value.
+/// directly avoids compiling an expression just to learn a value. Anything more elaborate that
+/// still does not depend on the row (<c>DateTime.UtcNow.AddDays(-7)</c>, <c>ids.Count</c>) is
+/// compiled and run once, so it can still drive an index lookup instead of forcing a scan.
 /// </summary>
 internal static class ExpressionEvaluator
 {
@@ -251,9 +259,69 @@ internal static class ExpressionEvaluator
                      || Nullable.GetUnderlyingType(convert.Type) == convert.Operand.Type:
                 return TryEvaluate(convert.Operand, out value);
 
-            default:
+            case ParameterExpression:
                 value = null;
                 return false;
+
+            default:
+                return TryCompile(expression, out value);
+        }
+    }
+
+    private static bool TryCompile(Expression expression, out object? value)
+    {
+        value = null;
+        if (!RowIndependence.Check(expression))
+        {
+            return false;
+        }
+        try
+        {
+            // Interpreted: this runs once per translation, so a JIT compile would cost more than it saves.
+            value = Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object))).Compile(preferInterpretation: true).Invoke();
+            return true;
+        }
+        catch
+        {
+            // Whatever it was, the predicate still runs as a residual filter and gives the right
+            // answer; only the chance of an index lookup is lost.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// A subtree can be evaluated ahead of the rows only if it neither reads a lambda parameter nor
+    /// contains a query root or another provider-specific node that has no value on its own.
+    /// </summary>
+    private sealed class RowIndependence : ExpressionVisitor
+    {
+        private bool _independent = true;
+
+        public static bool Check(Expression expression)
+        {
+            var visitor = new RowIndependence();
+            visitor.Visit(expression);
+            return visitor._independent;
+        }
+
+        protected override Expression VisitParameter(ParameterExpression node)
+        {
+            _independent = false;
+            return node;
+        }
+
+        protected override Expression VisitExtension(Expression node)
+        {
+            _independent = false;
+            return node;
+        }
+
+        protected override Expression VisitLambda<T>(Expression<T> node)
+        {
+            // A nested lambda's own parameters are fine; only free parameters matter. Treating any
+            // lambda as dependent is the conservative choice and costs nothing but an index.
+            _independent = false;
+            return node;
         }
     }
 
