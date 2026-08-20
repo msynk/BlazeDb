@@ -6,21 +6,12 @@ using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace BlazeDb.EntityFrameworkCore.Metadata;
 
-/// <summary>Maps entity types onto the engine's tables.</summary>
-internal interface IBlazeDbTableCache
-{
-    /// <summary>The engine instance the context was configured with.</summary>
-    Database Database { get; }
-
-    IBlazeDbTableBinding GetBinding(IEntityType entityType);
-}
-
 internal sealed class BlazeDbTableCache : IBlazeDbTableCache
 {
     // Bindings are reflection-built and immutable, and a database outlives any one context, so
     // they are cached against the database rather than rebuilt for every context instance. The
     // weak table lets a closed database and its bindings be collected together.
-    private static readonly ConditionalWeakTable<Database, ConcurrentDictionary<IEntityType, IBlazeDbTableBinding>>
+    private static readonly ConditionalWeakTable<BlazeDbDatabase, ConcurrentDictionary<IEntityType, IBlazeDbTableBinding>>
         Bindings = new();
 
     private readonly ConcurrentDictionary<IEntityType, IBlazeDbTableBinding> _bindings;
@@ -33,7 +24,7 @@ internal sealed class BlazeDbTableCache : IBlazeDbTableCache
         _bindings = Bindings.GetOrCreateValue(Database);
     }
 
-    public Database Database { get; }
+    public BlazeDbDatabase Database { get; }
 
     public IBlazeDbTableBinding GetBinding(IEntityType entityType) =>
         _bindings.GetOrAdd(

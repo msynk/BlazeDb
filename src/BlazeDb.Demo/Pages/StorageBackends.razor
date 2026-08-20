@@ -16,7 +16,7 @@
 
 <Section Title="The interface" IconName="code">
     <div class="grid grid-2">
-        <CodeBlock Title="BlazeDb.Storage.IStorage" Code="@InterfaceSnippet" />
+        <CodeBlock Title="BlazeDb.Storage.IBlazeDbStorage" Code="@InterfaceSnippet" />
         <div class="flex-col gap-lg">
             <Panel Title="Contract notes" IconName="info">
                 <dl class="kv">
@@ -48,21 +48,21 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td class="mono strong">OpfsStorage</td>
+                        <td class="mono strong">BlazeDbOpfsStorage</td>
                         <td class="mono">BlazeDb.Browser</td>
-                        <td class="mono">await OpfsStorage.CreateAsync("name")</td>
+                        <td class="mono">await BlazeDbOpfsStorage.CreateAsync("name")</td>
                         <td>Blazor WebAssembly. Private per-origin files, no user prompt, no quota dialog for reasonable sizes.</td>
                     </tr>
                     <tr>
-                        <td class="mono strong">FileStorage</td>
+                        <td class="mono strong">BlazeDbFileStorage</td>
                         <td class="mono">BlazeDb.Core</td>
-                        <td class="mono">new FileStorage(directory)</td>
+                        <td class="mono">new BlazeDbFileStorage(directory)</td>
                         <td>Desktop, server and integration tests. Atomic writes via temp file plus rename.</td>
                     </tr>
                     <tr>
-                        <td class="mono strong">InMemoryStorage</td>
+                        <td class="mono strong">BlazeDbInMemoryStorage</td>
                         <td class="mono">BlazeDb.Core</td>
-                        <td class="mono">new InMemoryStorage()</td>
+                        <td class="mono">new BlazeDbInMemoryStorage()</td>
                         <td>Unit tests and the failure injection on the durability page. Exposes <code>GetFile</code>/<code>SetFile</code> so you can corrupt bytes deliberately.</td>
                     </tr>
                     <tr>
@@ -74,7 +74,7 @@
                     <tr>
                         <td class="mono strong">your own</td>
                         <td class="mono">-</td>
-                        <td class="mono">class X : IStorage</td>
+                        <td class="mono">class X : IBlazeDbStorage</td>
                         <td>Anything addressable by name: a remote blob store, an encrypting wrapper, a tracing decorator like the one below.</td>
                     </tr>
                 </tbody>
@@ -163,8 +163,8 @@
             <Panel Title="How the election works" IconName="key">
                 <ol class="small mb-0">
                     <li><code>CreateAsync</code> requests a Web Lock named <code>blazedb:&lt;database&gt;</code> with <code>ifAvailable: true</code>.</li>
-                    <li>If the lock is already held, the request resolves immediately as unavailable and <code>DatabaseLockedException</code> is thrown.</li>
-                    <li>Otherwise the lock is held for the lifetime of the <code>OpfsStorage</code> instance and released by <code>Dispose</code> or when the tab closes.</li>
+                    <li>If the lock is already held, the request resolves immediately as unavailable and <code>BlazeDbDatabaseLockedException</code> is thrown.</li>
+                    <li>Otherwise the lock is held for the lifetime of the <code>BlazeDbOpfsStorage</code> instance and released by <code>Dispose</code> or when the tab closes.</li>
                     <li>Where <code>navigator.locks</code> is unavailable, the single-tab case is assumed and the open proceeds.</li>
                 </ol>
             </Panel>
@@ -199,7 +199,7 @@
                     would take.
                 </p>
                 <button class="btn btn-sm btn-block" disabled="@_busy" @onclick="TryLockAsync">
-                    <Icon Name="play" /> await OpfsStorage.CreateAsync("@DemoDbService.DatabaseName")
+                    <Icon Name="play" /> await BlazeDbOpfsStorage.CreateAsync("@DemoDbService.DatabaseName")
                 </button>
                 @if (_lockResult is not null)
                 {
@@ -214,9 +214,9 @@
             <Callout Tone="info" Title="What the browser backend does not do.">
                 There is no queue for becoming the writer, no notification when the lock frees up, and
                 cancellation tokens are accepted but not forwarded to JavaScript. Other tabs can open
-                the same database read-only (<code>OpfsStorage.CreateReadOnlyAsync</code> plus
-                <code>DatabaseOptions.ReadOnly</code>) and follow the writer's checkpoints through
-                <code>TabSync</code>; this demo keeps things simple and falls back to memory instead.
+                the same database read-only (<code>BlazeDbOpfsStorage.CreateReadOnlyAsync</code> plus
+                <code>BlazeDbDatabaseOptions.ReadOnly</code>) and follow the writer's checkpoints through
+                <code>BlazeDbTabSync</code>; this demo keeps things simple and falls back to memory instead.
             </Callout>
         </div>
     </div>
@@ -370,15 +370,15 @@
         _busy = true;
         try
         {
-            var storage = await BlazeDb.Browser.OpfsStorage.CreateAsync(DemoDbService.DatabaseName);
+            var storage = await BlazeDb.Browser.BlazeDbOpfsStorage.CreateAsync(DemoDbService.DatabaseName);
             storage.Dispose();
             _lockResult =
                 "The lock was available, so this tab is not the OPFS writer.\n" +
                 "That instance has been disposed again to release it.";
         }
-        catch (DatabaseLockedException ex)
+        catch (BlazeDbDatabaseLockedException ex)
         {
-            _lockResult = $"DatabaseLockedException\n{ex.Message}";
+            _lockResult = $"BlazeDbDatabaseLockedException\n{ex.Message}";
         }
         catch (Exception ex)
         {
@@ -402,7 +402,7 @@
     private const string InterfaceSnippet = """
         namespace BlazeDb.Storage;
 
-        public interface IStorage
+        public interface IBlazeDbStorage
         {
             ValueTask<byte[]?> ReadAsync(
                 string name,
@@ -425,7 +425,7 @@
         """;
 
     private const string DecoratorSnippet = """
-        public sealed class InstrumentedStorage(IStorage inner) : IStorage
+        public sealed class InstrumentedStorage(IBlazeDbStorage inner) : IBlazeDbStorage
         {
             private readonly List<StorageOp> _ops = [];
 
@@ -456,20 +456,20 @@
     private const string OpfsSnippet = """
         try
         {
-            var storage = await OpfsStorage.CreateAsync("blazedb-demo");
+            var storage = await BlazeDbOpfsStorage.CreateAsync("blazedb-demo");
 
-            var db = await Database.OpenAsync(new DatabaseOptions
+            var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
             {
                 Storage = storage,
                 FlushInterval = TimeSpan.FromMilliseconds(100),
                 CheckpointWalSize = 1 * 1024 * 1024,
             }.AddTable(TodoEntry.Table));
         }
-        catch (DatabaseLockedException)
+        catch (BlazeDbDatabaseLockedException)
         {
             // Another tab owns this database. Degrade to memory, or
             // ask the visitor to close the other tab.
-            var storage = new InMemoryStorage();
+            var storage = new BlazeDbInMemoryStorage();
         }
         """;
 
@@ -489,7 +489,7 @@
 
     private const string InteropSnippet = """
         [SupportedOSPlatform("browser")]
-        internal static partial class OpfsInterop
+        internal static partial class BlazeDbOpfsInterop
         {
             [JSImport("acquireLock", "blazedb-opfs")]
             public static partial Task<bool> AcquireLock(string lockName);

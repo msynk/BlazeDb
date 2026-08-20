@@ -6,9 +6,9 @@ namespace BlazeDb.Tests;
 
 public class ConstraintTests
 {
-    private static async Task<(Database Db, Table<int, Account> Accounts)> OpenAsync()
+    private static async Task<(BlazeDbDatabase Db, BlazeDbTable<int, Account> Accounts)> OpenAsync()
     {
-        var db = await Database.OpenAsync(new DatabaseOptions
+        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             FlushInterval = TimeSpan.FromHours(1),
         }.AddTable(Account.Table));
@@ -35,7 +35,7 @@ public class ConstraintTests
         await using var _ = db;
         accounts.Insert(Make(1, "ada"));
 
-        var ex = Assert.Throws<UniqueConstraintViolationException>(() => accounts.Insert(Make(2, "ada")));
+        var ex = Assert.Throws<BlazeDbUniqueConstraintViolationException>(() => accounts.Insert(Make(2, "ada")));
 
         Assert.Equal("Username", ex.IndexName);
         Assert.Equal("accounts", ex.TableName);
@@ -48,7 +48,7 @@ public class ConstraintTests
         await using var owned = db;
         accounts.Insert(Make(1, "ada"));
 
-        Assert.Throws<UniqueConstraintViolationException>(() => accounts.Insert(Make(2, "ada")));
+        Assert.Throws<BlazeDbUniqueConstraintViolationException>(() => accounts.Insert(Make(2, "ada")));
 
         Assert.Equal(1, accounts.Count);
         Assert.False(accounts.TryGet(2, out _));
@@ -89,7 +89,7 @@ public class ConstraintTests
         accounts.Insert(Make(2, "bob"));
         accounts.Insert(Make(3, "cleo"));
 
-        Assert.Throws<UniqueConstraintViolationException>(() => accounts.Insert(Make(4, "dan", slot: 7)));
+        Assert.Throws<BlazeDbUniqueConstraintViolationException>(() => accounts.Insert(Make(4, "dan", slot: 7)));
         Assert.Equal(3, accounts.Count);
     }
 
@@ -103,7 +103,7 @@ public class ConstraintTests
         using (var tx = db.BeginTransaction())
         {
             accounts.Insert(Make(2, "bob"));
-            Assert.Throws<UniqueConstraintViolationException>(() => accounts.Insert(Make(3, "ada")));
+            Assert.Throws<BlazeDbUniqueConstraintViolationException>(() => accounts.Insert(Make(3, "ada")));
             tx.Rollback();
         }
 
@@ -136,7 +136,7 @@ public class ConstraintTests
         // The same email under a different tenant is fine: the constraint spans both members.
         accounts.Insert(Make(2, "bob", tenant: 2, email: "x@b.c"));
 
-        Assert.Throws<UniqueConstraintViolationException>(
+        Assert.Throws<BlazeDbUniqueConstraintViolationException>(
             () => accounts.Insert(Make(3, "cleo", tenant: 1, email: "x@b.c")));
     }
 
@@ -177,21 +177,21 @@ public class ConstraintTests
     [Fact]
     public async Task Unique_Constraints_Are_Reenforced_After_Reload()
     {
-        var storage = new InMemoryStorage();
-        var options = new DatabaseOptions { FlushInterval = TimeSpan.FromHours(1), Storage = storage }
+        var storage = new BlazeDbInMemoryStorage();
+        var options = new BlazeDbDatabaseOptions { FlushInterval = TimeSpan.FromHours(1), Storage = storage }
             .AddTable(Account.Table);
 
-        var db = await Database.OpenAsync(options);
+        var db = await BlazeDbDatabase.OpenAsync(options);
         db.GetTable(Account.Table).Insert(Make(1, "ada"));
         await db.FlushAsync();
         await db.DisposeAsync();
 
-        var reopened = await Database.OpenAsync(
-            new DatabaseOptions { FlushInterval = TimeSpan.FromHours(1), Storage = storage }.AddTable(Account.Table));
+        var reopened = await BlazeDbDatabase.OpenAsync(
+            new BlazeDbDatabaseOptions { FlushInterval = TimeSpan.FromHours(1), Storage = storage }.AddTable(Account.Table));
         await using var _ = reopened;
         var accounts = reopened.GetTable(Account.Table);
 
         Assert.Equal(1, accounts.Count);
-        Assert.Throws<UniqueConstraintViolationException>(() => accounts.Insert(Make(2, "ada")));
+        Assert.Throws<BlazeDbUniqueConstraintViolationException>(() => accounts.Insert(Make(2, "ada")));
     }
 }

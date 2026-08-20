@@ -8,23 +8,23 @@ public enum Priority
 }
 
 /// <summary>Exercises the source generator across the supported type surface.</summary>
-[Table("todos")]
+[BlazeDbTable("todos")]
 public partial class TodoItem
 {
-    [Key]
+    [BlazeDbKey]
     public Guid Id { get; set; }
 
     public string Title { get; set; } = "";
 
     public string? Notes { get; set; }
 
-    [Index]
+    [BlazeDbIndex]
     public bool Done { get; set; }
 
-    [Index]
+    [BlazeDbIndex]
     public string? Category { get; set; }
 
-    [OrderedIndex]
+    [BlazeDbOrderedIndex]
     public DateTime CreatedAt { get; set; }
 
     public Priority Priority { get; set; }
@@ -45,40 +45,40 @@ public partial class TodoItem
 
     public byte[] Payload { get; set; } = [];
 
-    [Ignore]
+    [BlazeDbIgnore]
     public string Transient { get; set; } = "not persisted";
 }
 
 /// <summary>Exercises explicit field numbers and a string key.</summary>
-[Table]
+[BlazeDbTable]
 public partial class Setting
 {
-    [Field(5)]
-    [Key]
+    [BlazeDbField(5)]
+    [BlazeDbKey]
     public string Name { get; set; } = "";
 
-    [Field(9)]
+    [BlazeDbField(9)]
     public string Value { get; set; } = "";
 }
 
 /// <summary>Exercises unique constraints and compound indexes.</summary>
-[Table("accounts")]
-[CompoundIndex("TenantEmail", nameof(TenantId), nameof(Email), Unique = true)]
-[CompoundOrderedIndex("TenantCreated", nameof(TenantId), nameof(CreatedAt))]
+[BlazeDbTable("accounts")]
+[BlazeDbCompoundIndex("TenantEmail", nameof(TenantId), nameof(Email), Unique = true)]
+[BlazeDbCompoundOrderedIndex("TenantCreated", nameof(TenantId), nameof(CreatedAt))]
 public partial class Account
 {
-    [Key]
+    [BlazeDbKey]
     public int Id { get; set; }
 
-    [Index(Unique = true)]
+    [BlazeDbIndex(Unique = true)]
     public string Username { get; set; } = "";
 
-    [Index]
+    [BlazeDbIndex]
     public int TenantId { get; set; }
 
     public string Email { get; set; } = "";
 
-    [OrderedIndex(Unique = true)]
+    [BlazeDbOrderedIndex(Unique = true)]
     public int? Slot { get; set; }
 
     public DateTime CreatedAt { get; set; }

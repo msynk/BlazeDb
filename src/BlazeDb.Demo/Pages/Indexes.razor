@@ -362,7 +362,7 @@ else
 @code {
     private const int CompareIterations = 200;
 
-    private Table<Guid, TodoEntry>? _todos;
+    private BlazeDbTable<Guid, TodoEntry>? _todos;
 
     // hash section
     private string _hashIndex = "Done";
@@ -400,8 +400,8 @@ else
     private string? _invertedNote;
 
     // maintenance sandbox
-    private Database? _sandbox;
-    private Table<Guid, TodoEntry>? _sandboxTable;
+    private BlazeDbDatabase? _sandbox;
+    private BlazeDbTable<Guid, TodoEntry>? _sandboxTable;
     private readonly ScenarioLog _log = new();
     private int _sandboxCount;
     private int _sandboxOpen;
@@ -530,30 +530,30 @@ else
 
         if (_orderedIndex == "Effort")
         {
-            var from = _fromUnbounded ? Bound<int>.Unbounded : Bound<int>.At(_effortFrom);
-            var to = _toUnbounded ? Bound<int>.Unbounded : Bound<int>.At(_effortTo);
+            var from = _fromUnbounded ? BlazeDbBound<int>.Unbounded : BlazeDbBound<int>.At(_effortFrom);
+            var to = _toUnbounded ? BlazeDbBound<int>.Unbounded : BlazeDbBound<int>.At(_effortTo);
 
             _orderedRows = _todos.Range(TodoEntry.Indexes.Effort, from, to, _descending).ToList();
             _orderByCount = _todos.OrderBy(TodoEntry.Indexes.Effort, _descending).Count();
             _orderedCode =
                 $"todos.Range(TodoEntry.Indexes.Effort,\n" +
-                $"            {(_fromUnbounded ? "Bound<int>.Unbounded" : _effortFrom.ToString())},\n" +
-                $"            {(_toUnbounded ? "Bound<int>.Unbounded" : _effortTo.ToString())},\n" +
+                $"            {(_fromUnbounded ? "BlazeDbBound<int>.Unbounded" : _effortFrom.ToString())},\n" +
+                $"            {(_toUnbounded ? "BlazeDbBound<int>.Unbounded" : _effortTo.ToString())},\n" +
                 $"            descending: {_descending.ToString().ToLowerInvariant()})";
         }
         else
         {
             var fromValue = DateTime.SpecifyKind(_dateFrom.Date, DateTimeKind.Utc);
             var toValue = DateTime.SpecifyKind(_dateTo.Date.AddDays(1).AddTicks(-1), DateTimeKind.Utc);
-            var from = _fromUnbounded ? Bound<DateTime>.Unbounded : Bound<DateTime>.At(fromValue);
-            var to = _toUnbounded ? Bound<DateTime>.Unbounded : Bound<DateTime>.At(toValue);
+            var from = _fromUnbounded ? BlazeDbBound<DateTime>.Unbounded : BlazeDbBound<DateTime>.At(fromValue);
+            var to = _toUnbounded ? BlazeDbBound<DateTime>.Unbounded : BlazeDbBound<DateTime>.At(toValue);
 
             _orderedRows = _todos.Range(TodoEntry.Indexes.CreatedAt, from, to, _descending).ToList();
             _orderByCount = _todos.OrderBy(TodoEntry.Indexes.CreatedAt, _descending).Count();
             _orderedCode =
                 $"todos.Range(TodoEntry.Indexes.CreatedAt,\n" +
-                $"            {(_fromUnbounded ? "Bound<DateTime>.Unbounded" : $"new DateTime({fromValue:yyyy}, {fromValue:MM}, {fromValue:dd})")},\n" +
-                $"            {(_toUnbounded ? "Bound<DateTime>.Unbounded" : $"new DateTime({_dateTo:yyyy}, {_dateTo:MM}, {_dateTo:dd}).AddDays(1).AddTicks(-1)")}, // end of that day\n" +
+                $"            {(_fromUnbounded ? "BlazeDbBound<DateTime>.Unbounded" : $"new DateTime({fromValue:yyyy}, {fromValue:MM}, {fromValue:dd})")},\n" +
+                $"            {(_toUnbounded ? "BlazeDbBound<DateTime>.Unbounded" : $"new DateTime({_dateTo:yyyy}, {_dateTo:MM}, {_dateTo:dd}).AddDays(1).AddTicks(-1)")}, // end of that day\n" +
                 $"            descending: {_descending.ToString().ToLowerInvariant()})";
         }
 
@@ -686,15 +686,15 @@ else
         todos.Range(index, 40, 100);
 
         // One end open.
-        todos.Range(index, 40, Bound<int>.Unbounded);
+        todos.Range(index, 40, BlazeDbBound<int>.Unbounded);
 
         // Everything, in index order.
         todos.Range(index,
-                    Bound<int>.Unbounded,
-                    Bound<int>.Unbounded);
+                    BlazeDbBound<int>.Unbounded,
+                    BlazeDbBound<int>.Unbounded);
 
         // Explicit form of the implicit conversion.
-        todos.Range(index, Bound<int>.At(40), Bound<int>.At(100));
+        todos.Range(index, BlazeDbBound<int>.At(40), BlazeDbBound<int>.At(100));
 
         // Reverse traversal.
         todos.Range(index, 40, 100, descending: true);

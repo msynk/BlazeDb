@@ -2,17 +2,17 @@ using BlazeDb;
 
 namespace BlazeDb.Benchmarks;
 
-[Table("people")]
+[BlazeDbTable("people")]
 public partial class BenchPerson
 {
-    [Key]
+    [BlazeDbKey]
     public int Id { get; set; }
 
     public string Name { get; set; } = "";
 
-    [Index]
+    [BlazeDbIndex]
     public bool Flag { get; set; }
 
-    [OrderedIndex]
+    [BlazeDbOrderedIndex]
     public int Age { get; set; }
 }

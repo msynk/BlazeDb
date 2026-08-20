@@ -15,7 +15,7 @@ BlazeDb eliminates all three:
   to a write-ahead log (WAL) that is flushed asynchronously to OPFS (Origin Private File System).
   Periodic snapshots compact the log.
 - **No SQL**: the engine exposes low-level, typed query primitives (`Get`, `Range`, `Scan`,
-  `Query`). The EF Core provider translates LINQ directly into those primitives - there is no
+  `BlazeDbQuery`). The EF Core provider translates LINQ directly into those primitives - there is no
   intermediate query language to generate or parse.
 - **AOT/trimming friendly**: serialization and table metadata are produced by a Roslyn source
   generator - zero runtime reflection.
@@ -28,7 +28,7 @@ BlazeDb eliminates all three:
 | Project | Purpose |
 | --- | --- |
 | `src/BlazeDb/BlazeDb.Core` | The engine: tables, indexes, transactions, WAL/snapshot persistence, storage abstraction. No browser dependencies. |
-| `src/BlazeDb/BlazeDb.SourceGen` | Roslyn incremental source generator: binary serializers, key extractors, schema metadata for `[Table]` types. |
+| `src/BlazeDb/BlazeDb.SourceGen` | Roslyn incremental source generator: binary serializers, key extractors, schema metadata for `[BlazeDbTable]` types. |
 | `src/BlazeDb/BlazeDb.Browser` | OPFS and IndexedDB storage backends (`[JSImport]` ES modules), Web Locks single-writer election, WebCrypto cipher, cross-tab sync. |
 | `src/BlazeDb/BlazeDb.EntityFrameworkCore` | EF Core provider: `UseBlazeDb`, change tracking over live rows, LINQ translated to query plans. |
 | `src/BlazeDb.Benchmarks` | BenchmarkDotNet suite comparing against SQLite. |
@@ -42,21 +42,21 @@ also live under `src/`.
 ## Quick start
 
 ```csharp
-[Table("todos")]
-[CompoundIndex("CategoryDone", nameof(Category), nameof(Done))]
+[BlazeDbTable("todos")]
+[BlazeDbCompoundIndex("CategoryDone", nameof(Category), nameof(Done))]
 public partial class TodoItem
 {
-    [Key] public Guid Id { get; set; }
-    [Index(Unique = true)] public string Slug { get; set; } = "";
+    [BlazeDbKey] public Guid Id { get; set; }
+    [BlazeDbIndex(Unique = true)] public string Slug { get; set; } = "";
     public string Title { get; set; } = "";
     public string? Category { get; set; }
-    [Index] public bool Done { get; set; }
-    [OrderedIndex] public DateTime CreatedAt { get; set; }
+    [BlazeDbIndex] public bool Done { get; set; }
+    [BlazeDbOrderedIndex] public DateTime CreatedAt { get; set; }
 }
 
-var db = await Database.OpenAsync(new DatabaseOptions
+var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
 {
-    Storage = await OpfsStorage.CreateAsync("mydb"), // or FileStorage / InMemoryStorage / null
+    Storage = await BlazeDbOpfsStorage.CreateAsync("mydb"), // or BlazeDbFileStorage / BlazeDbInMemoryStorage / null
 }.AddTable(TodoItem.Table));
 
 var todos = db.GetTable(TodoItem.Table);
@@ -88,7 +88,7 @@ previousValues)` - which is what the EF Core provider does with the change track
 Streaming a large result set without blocking the browser's only thread:
 
 ```csharp
-await foreach (var todo in Query<Guid, TodoItem>.From(todos)
+await foreach (var todo in BlazeDbQuery<Guid, TodoItem>.From(todos)
     .UseIndex(TodoItem.Indexes.CreatedAt, from, to)
     .Where(t => !t.Done)
     .ExecuteAsync(batchSize: 256))
@@ -99,14 +99,14 @@ await foreach (var todo in Query<Guid, TodoItem>.From(todos)
 
 ### Encryption at rest
 
-`EncryptedStorage` wraps any backend and seals each write into its own AES-GCM frame, so WAL
+`BlazeDbEncryptedStorage` wraps any backend and seals each write into its own AES-GCM frame, so WAL
 appends stay appends. In the browser, use the WebCrypto cipher - the managed `AesGcm` throws
 inside the browser sandbox:
 
 ```csharp
-var key = EncryptedStorage.DeriveKey(passphrase, salt);   // PBKDF2, works everywhere
-var cipher = await WebCryptoCipher.CreateAsync(key);      // AesGcmCipher on desktop
-var storage = new EncryptedStorage(await OpfsStorage.CreateAsync("mydb"), cipher, ownsCipher: true);
+var key = BlazeDbEncryptedStorage.DeriveKey(passphrase, salt);   // PBKDF2, works everywhere
+var cipher = await BlazeDbWebCryptoCipher.CreateAsync(key);      // BlazeDbAesGcmCipher on desktop
+var storage = new BlazeDbEncryptedStorage(await BlazeDbOpfsStorage.CreateAsync("mydb"), cipher, ownsCipher: true);
 ```
 
 ### Storage quota
@@ -116,7 +116,7 @@ compacts if space is short, and refuses deliberately rather than failing mid-app
 stays intact in memory and the flush can be retried once space is freed:
 
 ```csharp
-var options = new DatabaseOptions
+var options = new BlazeDbDatabaseOptions
 {
     Storage = storage,
     QuotaReserveBytes = 4 * 1024 * 1024,
@@ -124,10 +124,10 @@ var options = new DatabaseOptions
 };
 
 var quota = await db.GetStorageQuotaAsync();   // null when the backend cannot say
-await OpfsStorage.RequestPersistenceAsync();   // ask not to be evicted
+await BlazeDbOpfsStorage.RequestPersistenceAsync();   // ask not to be evicted
 ```
 
-Wrapping a browser backend in `EncryptedStorage` keeps its quota awareness. When a background
+Wrapping a browser backend in `BlazeDbEncryptedStorage` keeps its quota awareness. When a background
 flush is refused (or fails for any other reason) the data stays committed in memory and the flusher
 keeps retrying; `db.LastBackgroundError` reports the standing failure so a UI can say durability is
 lagging, and clears again once a flush succeeds.
@@ -140,33 +140,33 @@ so a replica can never observe an uncommitted state:
 
 ```csharp
 // Writer tab
-var sync = await TabSync.CreatePublisherAsync("mydb");
-var db = await Database.OpenAsync(new DatabaseOptions
+var sync = await BlazeDbTabSync.CreatePublisherAsync("mydb");
+var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
 {
-    Storage = await OpfsStorage.CreateAsync("mydb"),
+    Storage = await BlazeDbOpfsStorage.CreateAsync("mydb"),
     OnCheckpoint = sync.PublishCheckpoint,
 }.AddTable(TodoItem.Table));
 
 // Replica tab
-var replica = await Database.OpenAsync(new DatabaseOptions
+var replica = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
 {
-    Storage = await OpfsStorage.CreateReadOnlyAsync("mydb"),
+    Storage = await BlazeDbOpfsStorage.CreateReadOnlyAsync("mydb"),
     ReadOnly = true,
 }.AddTable(TodoItem.Table));
-await TabSync.CreateReplicaAsync("mydb", replica, onChanged: RefreshUiAsync);
+await BlazeDbTabSync.CreateReplicaAsync("mydb", replica, onChanged: RefreshUiAsync);
 ```
 
-Where OPFS is unavailable (Firefox private windows, older Safari), swap in `IndexedDbStorage`:
+Where OPFS is unavailable (Firefox private windows, older Safari), swap in `BlazeDbIndexedDbStorage`:
 
 ```csharp
-IStorage storage = await IndexedDbStorage.IsOpfsAvailableAsync()
-    ? await OpfsStorage.CreateAsync("mydb")
-    : await IndexedDbStorage.CreateAsync("mydb");
+IBlazeDbStorage storage = await BlazeDbIndexedDbStorage.IsOpfsAvailableAsync()
+    ? await BlazeDbOpfsStorage.CreateAsync("mydb")
+    : await BlazeDbIndexedDbStorage.CreateAsync("mydb");
 ```
 
 ## EF Core
 
-The provider maps entity types onto the same `[Table]` types the engine uses - the descriptor the
+The provider maps entity types onto the same `[BlazeDbTable]` types the engine uses - the descriptor the
 source generator emits is the model - and needs no configuration beyond the database itself:
 
 ```csharp
@@ -175,7 +175,7 @@ public sealed class AppContext(DbContextOptions<AppContext> options) : DbContext
     public DbSet<TodoItem> Todos => Set<TodoItem>();
 }
 
-var db = await Database.OpenAsync(new DatabaseOptions { ... }.AddTable(TodoItem.Table));
+var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions { ... }.AddTable(TodoItem.Table));
 var context = new AppContext(new DbContextOptionsBuilder<AppContext>().UseBlazeDb(db).Options);
 
 var open = context.Todos.Where(t => !t.Done).OrderBy(t => t.CreatedAt).Take(20).ToList();
@@ -193,8 +193,8 @@ from anything EF does:
 - **`SaveChanges` is a memory operation.** It returns as soon as the transaction commits; the log
   reaches storage on the flush interval, or immediately if you call `db.FlushAsync()`.
 
-The model comes from the same attributes the engine uses: `[Key]` names the primary key whatever it
-is called, and `[Ignore]` keeps a property out of the entity type as well as out of the row bytes.
+The model comes from the same attributes the engine uses: `[BlazeDbKey]` names the primary key whatever it
+is called, and `[BlazeDbIgnore]` keeps a property out of the entity type as well as out of the row bytes.
 
 LINQ is translated as far as the engine's plan model reaches: a source chosen from the predicates -
 the primary-key dictionary for `Where(t => t.Id == id)`, `ids.Contains(t.Id)` and `Find(id)`, a
@@ -234,11 +234,11 @@ in the browser rather than describing it.
 | `/` | Architecture, benchmarks and a quick start, with live stats from the demo database. |
 | `/todos` | A working CRUD app: index-backed filters, sorting, paging and persisted preferences. |
 | `/schema` | Attributes, the generated descriptor inspected at runtime, supported types, diagnostics. |
-| `/indexes` | Hash lookups, ordered ranges, `Bound<T>`, and indexed versus scanned counting. |
+| `/indexes` | Hash lookups, ordered ranges, `BlazeDbBound<T>`, and indexed versus scanned counting. |
 | `/queries` | A query composer that shows the generated C#, the plan and the results. |
 | `/transactions` | Commit, rollback, dispose-without-commit, nesting errors and crash-recovery proof. |
 | `/durability` | WAL, snapshots, checkpoints, and simulated crashes including torn tails and corruption. |
-| `/storage` | The `IStorage` contract, a live trace of engine I/O, OPFS and Web Locks notes. |
+| `/storage` | The `IBlazeDbStorage` contract, a live trace of engine I/O, OPFS and Web Locks notes. |
 | `/serialization` | Build a row and inspect the exact bytes, field by field, with a hex dump. |
 | `/errors` | Every exception the engine raises, triggered live against throwaway databases. |
 | `/bench` | Read, write and encoding benchmarks measured in your own browser. |

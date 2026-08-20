@@ -39,7 +39,7 @@
                     <tbody>
                         <tr>
                             <td class="mono">DbContext</td>
-                            <td class="mono">Database</td>
+                            <td class="mono">BlazeDbDatabase</td>
                             <td class="small muted">one instance, one write lock, tables from the model</td>
                         </tr>
                         <tr>
@@ -244,7 +244,7 @@
             null, ""),
 
         new("Encryption at rest", "lock", "BlazeDb.Storage",
-            "An IStorage decorator that seals every write into an AES-GCM frame, keeping appends genuine appends. The file name is bound in as associated data, and a torn trailing frame is ignored while a tampered one is reported as corruption.",
+            "An IBlazeDbStorage decorator that seals every write into an AES-GCM frame, keeping appends genuine appends. The file name is bound in as associated data, and a torn trailing frame is ignored while a tampered one is reported as corruption.",
             null, ""),
 
         new("Quota-aware persistence", "disk", "BlazeDb.Core",

@@ -15,8 +15,8 @@ public class ReadBenchmarks
 {
     private const int Rows = 10_000;
 
-    private Database _db = null!;
-    private Table<int, BenchPerson> _people = null!;
+    private BlazeDbDatabase _db = null!;
+    private BlazeDbTable<int, BenchPerson> _people = null!;
     private SqliteConnection _sqlite = null!;
     private SqliteCommand _sqliteGet = null!;
     private SqliteCommand _sqliteRange = null!;
@@ -26,7 +26,7 @@ public class ReadBenchmarks
     [GlobalSetup]
     public async Task Setup()
     {
-        _db = await Database.OpenAsync(new DatabaseOptions().AddTable(BenchPerson.Table));
+        _db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions().AddTable(BenchPerson.Table));
         _people = _db.GetTable(BenchPerson.Table);
 
         _sqlite = new SqliteConnection("Data Source=:memory:");

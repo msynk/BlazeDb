@@ -29,7 +29,7 @@ public static class BlazeDbServiceCollectionExtensions
         new EntityFrameworkServicesBuilder(serviceCollection)
             .TryAdd<LoggingDefinitions, BlazeDbLoggingDefinitions>()
             .TryAdd<IDatabaseProvider, DatabaseProvider<BlazeDbOptionsExtension>>()
-            .TryAdd<IDatabase, BlazeDbDatabase>()
+            .TryAdd<IDatabase, BlazeDbEfCoreDatabase>()
             .TryAdd<IDbContextTransactionManager, BlazeDbTransactionManager>()
             .TryAdd<IDatabaseCreator, BlazeDbDatabaseCreator>()
             .TryAdd<IQueryContextFactory, BlazeDbQueryContextFactory>()

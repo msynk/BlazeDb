@@ -6,33 +6,33 @@ namespace BlazeDb.EntityFrameworkCore.Tests;
 /// A plain BlazeDb table type. Nothing about it is EF-specific: the provider maps entity types
 /// onto the descriptor the source generator emits from these attributes.
 /// </summary>
-[Table("people")]
-[CompoundIndex("CityAge", nameof(City), nameof(Age))]
+[BlazeDbTable("people")]
+[BlazeDbCompoundIndex("CityAge", nameof(City), nameof(Age))]
 public partial class Person
 {
-    [Key]
+    [BlazeDbKey]
     public int Id { get; set; }
 
     public string Name { get; set; } = "";
 
-    [Index]
+    [BlazeDbIndex]
     public string City { get; set; } = "";
 
-    [OrderedIndex]
+    [BlazeDbOrderedIndex]
     public int Age { get; set; }
 
-    [Index(Unique = true)]
+    [BlazeDbIndex(Unique = true)]
     public string? Email { get; set; }
 }
 
 /// <summary>A second table, so saves spanning two tables can be shown to be one transaction.</summary>
-[Table("orders")]
+[BlazeDbTable("orders")]
 public partial class Order
 {
-    [Key]
+    [BlazeDbKey]
     public int Id { get; set; }
 
-    [Index]
+    [BlazeDbIndex]
     public int PersonId { get; set; }
 
     public decimal Total { get; set; }
@@ -63,18 +63,18 @@ public enum TagKind : byte
 /// and a property the serializer ignores - the shapes that need the provider to read BlazeDb's own
 /// attributes and to convert predicate values before handing them to an index.
 /// </summary>
-[Table("tags")]
+[BlazeDbTable("tags")]
 public partial class Tag
 {
-    [Key]
+    [BlazeDbKey]
     public string Slug { get; set; } = "";
 
-    [Index]
+    [BlazeDbIndex]
     public TagKind Kind { get; set; }
 
-    [OrderedIndex]
+    [BlazeDbOrderedIndex]
     public byte Weight { get; set; }
 
-    [Ignore]
+    [BlazeDbIgnore]
     public string Transient { get; set; } = "";
 }

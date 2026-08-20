@@ -35,9 +35,9 @@
                 <dd>Guid</dd>
                 <dt>KeySelector</dt>
                 <dd>static row =&gt; row.Id</dd>
-                <dt>RowWriter</dt>
+                <dt>BlazeDbRowWriter</dt>
                 <dd>__BlazeWriteRow</dd>
-                <dt>RowReader</dt>
+                <dt>BlazeDbRowReader</dt>
                 <dd>__BlazeReadRow</dd>
                 <dt>Indexes</dt>
                 <dd>@TodoEntry.Table.Indexes.Count</dd>
@@ -118,7 +118,7 @@
                     <tr>
                         <td class="mono strong">[Index(Unique = true)]</td>
                         <td>property</td>
-                        <td>Either index attribute can be unique: a write that would duplicate a non-null value throws <code>UniqueConstraintViolationException</code> before anything is changed.</td>
+                        <td>Either index attribute can be unique: a write that would duplicate a non-null value throws <code>BlazeDbUniqueConstraintViolationException</code> before anything is changed.</td>
                     </tr>
                     <tr>
                         <td class="mono strong">[CompoundIndex(name, props…)]</td>
@@ -137,7 +137,7 @@
 
     <Callout Tone="ok" Title="Proof that [Ignore] is honoured.">
         A row with <code>Transient = "@IgnoreProbeInput"</code> was serialized and read back through the
-        generated <code>RowWriter</code>/<code>RowReader</code>; the decoded value is
+        generated <code>BlazeDbRowWriter</code>/<code>BlazeDbRowReader</code>; the decoded value is
         <code>"@_ignoreProbeResult"</code> - the field initialiser, not the value that was written.
     </Callout>
 </Section>
@@ -267,7 +267,7 @@
 </Section>
 
 <Section Title="The generator is optional" IconName="key"
-         Lead="A TableDescriptor is a plain object. Write one by hand and positional records, custom comparers and computed keys all become available.">
+         Lead="A BlazeDbTableDescriptor is a plain object. Write one by hand and positional records, custom comparers and computed keys all become available.">
     <div class="grid grid-2">
         <CodeBlock Title="Hand-written descriptor" Code="@ManualSource" />
 
@@ -317,7 +317,7 @@
 @code {
     private const string IgnoreProbeInput = "this value is never persisted";
 
-    private Table<int, Metric>? _metrics;
+    private BlazeDbTable<int, Metric>? _metrics;
     private List<Metric> _metricRows = [];
     private string _metricNote = "";
     private string _ignoreProbeResult = "";
@@ -373,9 +373,9 @@
             Transient = IgnoreProbeInput,
         };
 
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         TodoEntry.Table.RowWriter(writer, row);
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         return TodoEntry.Table.RowReader(ref reader).Transient;
     }
 
@@ -397,28 +397,28 @@
     private const string ModelSource = """
         public enum Priority { Low, Normal, High, Critical }
 
-        [Table("todos")]
+        [BlazeDbTable("todos")]
         public partial class TodoEntry
         {
-            [Key]
+            [BlazeDbKey]
             public Guid Id { get; set; }
 
             public string Title { get; set; } = "";
             public string? Notes { get; set; }
 
-            [Index]
+            [BlazeDbIndex]
             public bool Done { get; set; }
 
-            [Index]
+            [BlazeDbIndex]
             public string? Category { get; set; }
 
-            [Index(Name = "ByPriority")]
+            [BlazeDbIndex(Name = "ByPriority")]
             public Priority Priority { get; set; }
 
-            [OrderedIndex]
+            [BlazeDbOrderedIndex]
             public DateTime CreatedAt { get; set; }
 
-            [OrderedIndex]
+            [BlazeDbOrderedIndex]
             public int Effort { get; set; }
 
             public int? Rating { get; set; }
@@ -430,17 +430,17 @@
             public int[] Scores { get; set; } = [];
             public byte[] Payload { get; set; } = [];
 
-            [Ignore]
+            [BlazeDbIgnore]
             public string Transient { get; set; } = "computed at runtime";
         }
 
         // A second table: string key, explicit field numbers.
-        [Table("settings")]
+        [BlazeDbTable("settings")]
         public partial class Setting
         {
-            [Field(1)][Key] public string Name { get; set; } = "";
-            [Field(2)] public string Value { get; set; } = "";
-            [Field(3)] public DateTime UpdatedAt { get; set; }
+            [BlazeDbField(1)][Key] public string Name { get; set; } = "";
+            [BlazeDbField(2)] public string Value { get; set; } = "";
+            [BlazeDbField(3)] public DateTime UpdatedAt { get; set; }
         }
         """;
 
@@ -452,14 +452,14 @@
         {
             partial class TodoEntry
             {
-                public static readonly TableDescriptor<Guid, TodoEntry> Table = new(
+                public static readonly BlazeDbTableDescriptor<Guid, TodoEntry> Table = new(
                     "todos",
                     static row => row.Id,
                     __BlazeWriteRow,
                     __BlazeReadRow,
                     __BlazeWriteKey,
                     __BlazeReadKey,
-                    new IndexDefinition<TodoEntry>[]
+                    new BlazeDbIndexDefinition<TodoEntry>[]
                     {
                         Indexes.Done,
                         Indexes.Category,
@@ -470,33 +470,33 @@
 
                 public static class Indexes
                 {
-                    public static readonly HashIndexDefinition<TodoEntry, bool> Done =
+                    public static readonly BlazeDbHashIndexDefinition<TodoEntry, bool> Done =
                         new("Done", static row => row.Done);
 
-                    public static readonly HashIndexDefinition<TodoEntry, string?> Category =
+                    public static readonly BlazeDbHashIndexDefinition<TodoEntry, string?> Category =
                         new("Category", static row => row.Category);
 
-                    public static readonly HashIndexDefinition<TodoEntry, Priority> ByPriority =
+                    public static readonly BlazeDbHashIndexDefinition<TodoEntry, Priority> ByPriority =
                         new("ByPriority", static row => row.Priority);
 
-                    public static readonly OrderedIndexDefinition<TodoEntry, DateTime> CreatedAt =
+                    public static readonly BlazeDbOrderedIndexDefinition<TodoEntry, DateTime> CreatedAt =
                         new("CreatedAt", static row => row.CreatedAt);
 
-                    public static readonly OrderedIndexDefinition<TodoEntry, int> Effort =
+                    public static readonly BlazeDbOrderedIndexDefinition<TodoEntry, int> Effort =
                         new("Effort", static row => row.Effort);
                 }
 
-                private static void __BlazeWriteRow(BufferWriter writer, TodoEntry row)
+                private static void __BlazeWriteRow(BlazeDbBufferWriter writer, TodoEntry row)
                 {
-                    writer.WriteTag(1, WireType.LengthDelimited);
+                    writer.WriteTag(1, BlazeDbWireType.LengthDelimited);
                     writer.WriteGuid(row.Id);
-                    writer.WriteTag(2, WireType.LengthDelimited);
+                    writer.WriteTag(2, BlazeDbWireType.LengthDelimited);
                     writer.WriteString(row.Title);
                     if (row.Notes is not null) { /* field 3 */ }
                     // …one branch per property, nulls omitted, collections repeated
                 }
 
-                private static TodoEntry __BlazeReadRow(ref BufferReader reader)
+                private static TodoEntry __BlazeReadRow(ref BlazeDbBufferReader reader)
                 {
                     // tag loop; unknown field numbers are skipped, which is what
                     // makes older readers tolerate newer writers
@@ -521,34 +521,34 @@
         public static class MetricTable
         {
             // A case-insensitive hash index - attributes cannot express this.
-            public static readonly HashIndexDefinition<Metric, string> ByName =
+            public static readonly BlazeDbHashIndexDefinition<Metric, string> ByName =
                 new("ByName", static m => m.Name, StringComparer.OrdinalIgnoreCase);
 
-            public static readonly OrderedIndexDefinition<Metric, double> ByValue =
+            public static readonly BlazeDbOrderedIndexDefinition<Metric, double> ByValue =
                 new("ByValue", static m => m.Value);
 
-            public static readonly TableDescriptor<int, Metric> Descriptor = new(
+            public static readonly BlazeDbTableDescriptor<int, Metric> Descriptor = new(
                 "metrics",
                 static m => m.Id,
                 WriteRow,
                 ReadRow,
                 static (w, k) => w.WriteVarInt(k),
-                static (ref BufferReader r) => (int)r.ReadVarInt(),
+                static (ref BlazeDbBufferReader r) => (int)r.ReadVarInt(),
                 [ByName, ByValue]);
 
-            private static void WriteRow(BufferWriter writer, Metric row)
+            private static void WriteRow(BlazeDbBufferWriter writer, Metric row)
             {
-                writer.WriteTag(1, WireType.VarInt);
+                writer.WriteTag(1, BlazeDbWireType.VarInt);
                 writer.WriteVarInt(row.Id);
-                writer.WriteTag(2, WireType.LengthDelimited);
+                writer.WriteTag(2, BlazeDbWireType.LengthDelimited);
                 writer.WriteString(row.Name);
-                writer.WriteTag(3, WireType.Fixed64);
+                writer.WriteTag(3, BlazeDbWireType.Fixed64);
                 writer.WriteDouble(row.Value);
-                writer.WriteTag(4, WireType.Fixed64);
+                writer.WriteTag(4, BlazeDbWireType.Fixed64);
                 writer.WriteDateTime(row.At);
             }
 
-            private static Metric ReadRow(ref BufferReader reader)
+            private static Metric ReadRow(ref BlazeDbBufferReader reader)
             {
                 var id = 0; var name = ""; var value = 0d; var at = default(DateTime);
                 while (reader.Remaining > 0)

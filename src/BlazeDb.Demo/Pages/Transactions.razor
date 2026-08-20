@@ -216,9 +216,9 @@
         string Tone,
         Func<Transactions, Task> Run);
 
-    private Database? _db;
-    private InMemoryStorage? _storage;
-    private Table<Guid, TodoEntry>? _table;
+    private BlazeDbDatabase? _db;
+    private BlazeDbInMemoryStorage? _storage;
+    private BlazeDbTable<Guid, TodoEntry>? _table;
     private readonly ScenarioLog _log = new();
     private string _selected = "";
     private bool _running;
@@ -309,7 +309,7 @@
             using (var txn = db.BeginTransaction())
             {
                 todos.Insert(good);
-                todos.Insert(duplicate);   // DuplicateKeyException
+                todos.Insert(duplicate);   // BlazeDbDuplicateKeyException
                 txn.Rollback();            // 'good' is reverted too
             }
             """,
@@ -376,7 +376,7 @@
         }
 
         // Real storage, but no background flushing: durability stays explicit.
-        _storage = new InMemoryStorage();
+        _storage = new BlazeDbInMemoryStorage();
         _db = await DemoSandbox.OpenAsync(_storage, TimeSpan.FromHours(1), long.MaxValue);
         _table = _db.GetTable(TodoEntry.Table);
 
@@ -542,11 +542,11 @@
                 table.Insert(Row("duplicate", 778, existing.Id));
                 _log.Error("No exception", "unexpected");
             }
-            catch (DuplicateKeyException ex)
+            catch (BlazeDbDuplicateKeyException ex)
             {
                 _log.Error(
                     "Second insert throws",
-                    $"DuplicateKeyException(table: \"{ex.TableName}\", key: {ex.Key})",
+                    $"BlazeDbDuplicateKeyException(table: \"{ex.TableName}\", key: {ex.Key})",
                     "The transaction is still open and still valid - nothing was auto-rolled-back.");
             }
 
@@ -596,7 +596,7 @@
     {
         using var txn = _db!.BeginTransaction();
         _table!.Insert(Row("inside the batch", 55));
-        _log.Run("Transaction open with one write", "todos.Insert(row)");
+        _log.Run("BlazeDbTransaction open with one write", "todos.Insert(row)");
 
         try
         {
@@ -626,7 +626,7 @@
             var rows = _batchRows;
 
             // Autocommit: every write becomes its own log record.
-            var storageA = new InMemoryStorage();
+            var storageA = new BlazeDbInMemoryStorage();
             await using var dbA = await DemoSandbox.OpenAsync(storageA, TimeSpan.FromHours(1), long.MaxValue);
             var tableA = dbA.GetTable(TodoEntry.Table);
 
@@ -638,7 +638,7 @@
             var autoMs = sw.Elapsed.TotalMilliseconds;
 
             // One transaction for the whole load.
-            var storageB = new InMemoryStorage();
+            var storageB = new BlazeDbInMemoryStorage();
             await using var dbB = await DemoSandbox.OpenAsync(storageB, TimeSpan.FromHours(1), long.MaxValue);
             var tableB = dbB.GetTable(TodoEntry.Table);
 
@@ -683,7 +683,7 @@
 
         try
         {
-            var storage = new InMemoryStorage();
+            var storage = new BlazeDbInMemoryStorage();
 
             // No background flushing, so durability is entirely explicit.
             var db = await DemoSandbox.OpenAsync(storage, TimeSpan.FromHours(1), long.MaxValue);

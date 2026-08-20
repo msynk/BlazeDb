@@ -7,9 +7,9 @@ namespace BlazeDb.Tests;
 
 public class QueryTests
 {
-    private static async Task<(Database Db, Table<Guid, TodoItem> Todos)> OpenAsync(IStorage? storage = null)
+    private static async Task<(BlazeDbDatabase Db, BlazeDbTable<Guid, TodoItem> Todos)> OpenAsync(IBlazeDbStorage? storage = null)
     {
-        var db = await Database.OpenAsync(new DatabaseOptions
+        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = TimeSpan.FromHours(1),
@@ -121,11 +121,11 @@ public class QueryTests
         var middle = todos.Range(TodoItem.Indexes.CreatedAt, Day(3), Day(5)).Select(t => t.Title).ToList();
         Assert.Equal(["day3", "day4", "day5"], middle);
 
-        var fromOnly = todos.Range(TodoItem.Indexes.CreatedAt, Day(8), Bound<DateTime>.Unbounded)
+        var fromOnly = todos.Range(TodoItem.Indexes.CreatedAt, Day(8), BlazeDbBound<DateTime>.Unbounded)
             .Select(t => t.Title).ToList();
         Assert.Equal(["day8", "day9"], fromOnly);
 
-        var toOnly = todos.Range(TodoItem.Indexes.CreatedAt, Bound<DateTime>.Unbounded, Day(2))
+        var toOnly = todos.Range(TodoItem.Indexes.CreatedAt, BlazeDbBound<DateTime>.Unbounded, Day(2))
             .Select(t => t.Title).ToList();
         Assert.Equal(["day1", "day2"], toOnly);
 
@@ -157,7 +157,7 @@ public class QueryTests
     [Fact]
     public async Task Indexes_Are_Rebuilt_After_Recovery()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         Guid keepId;
 
         var (db, todos) = await OpenAsync(storage);
@@ -192,7 +192,7 @@ public class QueryTests
 
         DateTime Day(int d) => new(2026, 1, d, 0, 0, 0, DateTimeKind.Utc);
 
-        var query = Query<Guid, TodoItem>.From(todos)
+        var query = BlazeDbQuery<Guid, TodoItem>.From(todos)
             .UseIndex(TodoItem.Indexes.CreatedAt, Day(2), Day(9))
             .Where(t => t.Done)
             .Skip(1)
@@ -211,7 +211,7 @@ public class QueryTests
         todos.Insert(Make("alpha", done: true, day: 2));
         todos.Insert(Make("mid", done: false, day: 3));
 
-        var titles = Query<Guid, TodoItem>.From(todos)
+        var titles = BlazeDbQuery<Guid, TodoItem>.From(todos)
             .UseIndex(TodoItem.Indexes.Done, true)
             .OrderBy(t => t.Title)
             .Execute(t => t.Title)
@@ -229,7 +229,7 @@ public class QueryTests
         todos.Insert(Make("bb", day: 2));
         todos.Insert(Make("ccc", day: 3));
 
-        var count = Query<Guid, TodoItem>.From(todos)
+        var count = BlazeDbQuery<Guid, TodoItem>.From(todos)
             .Where(t => t.Title.Length >= 2)
             .Count();
 
@@ -242,9 +242,9 @@ public class QueryTests
         var (db, todos) = await OpenAsync();
         await using var _ = db;
 
-        var query = Query<Guid, TodoItem>.From(todos).UseIndex(TodoItem.Indexes.Done, true);
+        var query = BlazeDbQuery<Guid, TodoItem>.From(todos).UseIndex(TodoItem.Indexes.Done, true);
         Assert.Throws<InvalidOperationException>(() =>
-            query.UseIndex(TodoItem.Indexes.CreatedAt, Bound<DateTime>.Unbounded, Bound<DateTime>.Unbounded));
+            query.UseIndex(TodoItem.Indexes.CreatedAt, BlazeDbBound<DateTime>.Unbounded, BlazeDbBound<DateTime>.Unbounded));
     }
 
     [Fact]
@@ -257,12 +257,12 @@ public class QueryTests
         todos.Insert(a);
         todos.Insert(b);
 
-        Assert.Same(a, Query<Guid, TodoItem>.From(todos).UseKey(a.Id).FirstOrDefault());
-        Assert.Empty(Query<Guid, TodoItem>.From(todos).UseKey(Guid.NewGuid()).ToList());
+        Assert.Same(a, BlazeDbQuery<Guid, TodoItem>.From(todos).UseKey(a.Id).FirstOrDefault());
+        Assert.Empty(BlazeDbQuery<Guid, TodoItem>.From(todos).UseKey(Guid.NewGuid()).ToList());
         // Residual filters still apply on top of the key source.
-        Assert.Empty(Query<Guid, TodoItem>.From(todos).UseKey(a.Id).Where(t => !t.Done).ToList());
+        Assert.Empty(BlazeDbQuery<Guid, TodoItem>.From(todos).UseKey(a.Id).Where(t => !t.Done).ToList());
         Assert.Throws<InvalidOperationException>(() =>
-            Query<Guid, TodoItem>.From(todos).UseKey(a.Id).UseIndex(TodoItem.Indexes.Done, true));
+            BlazeDbQuery<Guid, TodoItem>.From(todos).UseKey(a.Id).UseIndex(TodoItem.Indexes.Done, true));
     }
 
     [Fact]
@@ -278,9 +278,9 @@ public class QueryTests
         todos.Insert(c);
 
         // Order follows the keys; duplicates and misses are skipped.
-        var rows = Query<Guid, TodoItem>.From(todos).UseKeys([c.Id, Guid.NewGuid(), a.Id, c.Id]).ToList();
+        var rows = BlazeDbQuery<Guid, TodoItem>.From(todos).UseKeys([c.Id, Guid.NewGuid(), a.Id, c.Id]).ToList();
         Assert.Equal(["c", "a"], rows.Select(t => t.Title));
-        Assert.Empty(Query<Guid, TodoItem>.From(todos).UseKeys([]).ToList());
+        Assert.Empty(BlazeDbQuery<Guid, TodoItem>.From(todos).UseKeys([]).ToList());
     }
 
     [Fact]
@@ -289,7 +289,7 @@ public class QueryTests
         var (db, todos) = await OpenAsync();
         await using var _ = db;
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => Query<Guid, TodoItem>.From(todos).Skip(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => Query<Guid, TodoItem>.From(todos).Take(-1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => BlazeDbQuery<Guid, TodoItem>.From(todos).Skip(-1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => BlazeDbQuery<Guid, TodoItem>.From(todos).Take(-1));
     }
 }

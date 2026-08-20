@@ -131,18 +131,18 @@
                     <div class="dg-note">Points at the newest valid snapshot</div>
                 </div>
             </div>
-            <div class="dg-arrow"><Icon Name="arrow-down" /> IStorage - four async methods</div>
+            <div class="dg-arrow"><Icon Name="arrow-down" /> IBlazeDbStorage - four async methods</div>
             <div class="dg-row">
                 <div class="dg-box io">
-                    <div class="dg-title"><Icon Name="disk" /> OpfsStorage</div>
+                    <div class="dg-title"><Icon Name="disk" /> BlazeDbOpfsStorage</div>
                     <div class="dg-note">Browser, private origin file system</div>
                 </div>
                 <div class="dg-box io">
-                    <div class="dg-title"><Icon Name="disk" /> FileStorage</div>
+                    <div class="dg-title"><Icon Name="disk" /> BlazeDbFileStorage</div>
                     <div class="dg-note">Desktop and server hosts</div>
                 </div>
                 <div class="dg-box io">
-                    <div class="dg-title"><Icon Name="cpu" /> InMemoryStorage</div>
+                    <div class="dg-title"><Icon Name="cpu" /> BlazeDbInMemoryStorage</div>
                     <div class="dg-note">Tests and crash simulation</div>
                 </div>
             </div>
@@ -235,25 +235,25 @@
     protected override async Task OnInitializedAsync() => await Db.GetDatabaseAsync();
 
     private const string ModelSnippet = """
-        [Table("todos")]
+        [BlazeDbTable("todos")]
         public partial class TodoEntry
         {
-            [Key] public Guid Id { get; set; }
+            [BlazeDbKey] public Guid Id { get; set; }
 
             public string Title { get; set; } = "";
 
-            [Index] public bool Done { get; set; }
+            [BlazeDbIndex] public bool Done { get; set; }
 
-            [Index] public string? Category { get; set; }
+            [BlazeDbIndex] public string? Category { get; set; }
 
-            [OrderedIndex] public DateTime CreatedAt { get; set; }
+            [BlazeDbOrderedIndex] public DateTime CreatedAt { get; set; }
         }
         """;
 
     private const string UsageSnippet = """
-        var db = await Database.OpenAsync(new DatabaseOptions
+        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
-            Storage = await OpfsStorage.CreateAsync("mydb"),
+            Storage = await BlazeDbOpfsStorage.CreateAsync("mydb"),
             FlushInterval = TimeSpan.FromMilliseconds(100),
         }.AddTable(TodoEntry.Table));
 

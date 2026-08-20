@@ -9,11 +9,11 @@ public static class BlazeDbModelBuilderExtensions
 {
     /// <summary>
     /// Binds the entity type to <paramref name="descriptor"/>. Only needed when the descriptor is
-    /// hand-written or lives elsewhere: for a type annotated with <c>[BlazeDb.Table]</c>, the
+    /// hand-written or lives elsewhere: for a type annotated with <c>[BlazeDb.BlazeDbTable]</c>, the
     /// source generator emits a static <c>Table</c> member the provider finds on its own.
     /// </summary>
     public static EntityTypeBuilder<TEntity> UseBlazeDbTable<TEntity, TKey>(
-        this EntityTypeBuilder<TEntity> builder, BlazeDb.TableDescriptor<TKey, TEntity> descriptor)
+        this EntityTypeBuilder<TEntity> builder, BlazeDb.BlazeDbTableDescriptor<TKey, TEntity> descriptor)
         where TEntity : class
         where TKey : notnull
     {

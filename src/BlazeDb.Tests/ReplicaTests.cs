@@ -6,24 +6,24 @@ namespace BlazeDb.Tests;
 
 /// <summary>
 /// Read-replica semantics. In the browser these instances live in different tabs and share the
-/// origin's storage; here two Database instances share one IStorage, which exercises the same
+/// origin's storage; here two BlazeDbDatabase instances share one IBlazeDbStorage, which exercises the same
 /// paths - the tabs only ever communicate through storage anyway.
 /// </summary>
 public class ReplicaTests
 {
-    private static Task<Database> OpenWriterAsync(IStorage storage, Action<DatabaseOptions>? configure = null)
+    private static Task<BlazeDbDatabase> OpenWriterAsync(IBlazeDbStorage storage, Action<BlazeDbDatabaseOptions>? configure = null)
     {
-        var options = new DatabaseOptions
+        var options = new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = TimeSpan.FromHours(1),
         }.AddTable(TodoItem.Table);
         configure?.Invoke(options);
-        return Database.OpenAsync(options).AsTask();
+        return BlazeDbDatabase.OpenAsync(options).AsTask();
     }
 
-    private static Task<Database> OpenReplicaAsync(IStorage storage) =>
-        Database.OpenAsync(new DatabaseOptions
+    private static Task<BlazeDbDatabase> OpenReplicaAsync(IBlazeDbStorage storage) =>
+        BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             Storage = storage,
             ReadOnly = true,
@@ -35,7 +35,7 @@ public class ReplicaTests
     [Fact]
     public async Task A_Replica_Refuses_Writes()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using var writer = await OpenWriterAsync(storage);
         await using var replica = await OpenReplicaAsync(storage);
 
@@ -50,7 +50,7 @@ public class ReplicaTests
     [Fact]
     public async Task A_Replica_Sees_Flushed_Writes_After_Reloading()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using var writer = await OpenWriterAsync(storage);
         await using var replica = await OpenReplicaAsync(storage);
 
@@ -68,7 +68,7 @@ public class ReplicaTests
     [Fact]
     public async Task A_Replica_Never_Sees_Unflushed_Writes()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using var writer = await OpenWriterAsync(storage);
         await using var replica = await OpenReplicaAsync(storage);
 
@@ -81,7 +81,7 @@ public class ReplicaTests
     [Fact]
     public async Task Reloading_Picks_Up_Deletes_And_Updates()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using var writer = await OpenWriterAsync(storage);
         var writerTodos = writer.GetTable(TodoItem.Table);
         var keep = Make("keep");
@@ -107,7 +107,7 @@ public class ReplicaTests
     [Fact]
     public async Task Reloading_Rebuilds_Secondary_Indexes()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using var writer = await OpenWriterAsync(storage);
         var writerTodos = writer.GetTable(TodoItem.Table);
         writerTodos.Insert(new TodoItem { Id = Guid.NewGuid(), Title = "a", Done = true, Category = "work" });
@@ -128,7 +128,7 @@ public class ReplicaTests
     [Fact]
     public async Task Reloading_Twice_Does_Not_Duplicate_Rows()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using var writer = await OpenWriterAsync(storage);
         writer.GetTable(TodoItem.Table).Insert(Make("only once"));
         await writer.FlushAsync();
@@ -144,7 +144,7 @@ public class ReplicaTests
     [Fact]
     public async Task A_Replica_Follows_The_Writer_Across_A_Checkpoint()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using var writer = await OpenWriterAsync(storage);
         var writerTodos = writer.GetTable(TodoItem.Table);
         for (var i = 0; i < 20; i++)
@@ -167,7 +167,7 @@ public class ReplicaTests
     [Fact]
     public async Task Checkpoints_Are_Announced_Once_They_Are_Durable()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         var announced = new List<ulong>();
         await using var writer = await OpenWriterAsync(storage, o => o.OnCheckpoint = g => announced.Add(g));
 
@@ -209,9 +209,9 @@ public class ReplicaTests
     }
 
     /// <summary>Records every mutating call so a test can assert a replica stays passive.</summary>
-    private sealed class RecordingStorage : IStorage
+    private sealed class RecordingStorage : IBlazeDbStorage
     {
-        private readonly InMemoryStorage _inner = new();
+        private readonly BlazeDbInMemoryStorage _inner = new();
 
         public List<string> Writes { get; } = [];
 

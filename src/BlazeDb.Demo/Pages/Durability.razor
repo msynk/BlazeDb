@@ -115,7 +115,7 @@
                     </button>
                 </div>
                 <p class="tiny muted mt-2 mb-0">
-                    “Crash” abandons the <code>Database</code> instance - whatever it had not flushed is
+                    “Crash” abandons the <code>BlazeDbDatabase</code> instance - whatever it had not flushed is
                     gone and it never touches storage again - then opens a new one over the same bytes,
                     exactly what closing a tab does.
                 </p>
@@ -203,7 +203,7 @@
             <Callout Tone="err" Title="A corrupt manifest or snapshot is fatal.">
                 Those are read through an atomic write, so a bad checksum means the bytes were damaged
                 rather than merely incomplete. <code>OpenAsync</code> throws
-                <code>CorruptDatabaseException</code> instead of silently losing data.
+                <code>BlazeDbCorruptDatabaseException</code> instead of silently losing data.
             </Callout>
             <Callout Tone="info" Title="Durability lag is a number you choose.">
                 With the default 100 ms interval, a crash can cost at most the last 100 ms of writes.
@@ -216,9 +216,9 @@
 @code {
     private sealed record FileRow(string Name, string Role, string Tone, int Bytes);
 
-    private InMemoryStorage _storage = new();
-    private Database? _db;
-    private Table<Guid, TodoEntry>? _table;
+    private BlazeDbInMemoryStorage _storage = new();
+    private BlazeDbDatabase? _db;
+    private BlazeDbTable<Guid, TodoEntry>? _table;
     private readonly ScenarioLog _log = new();
 
     private string _flushChoice = "never";
@@ -319,10 +319,10 @@
             await OpenAsync("reopened after an options change");
             _log.Ok(
                 "Reopened with new options",
-                $"await Database.OpenAsync(new DatabaseOptions {{ Storage = storage, FlushInterval = {FlushLabel()}, CheckpointWalSize = {CheckpointLabel()} }} …)",
+                $"await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions {{ Storage = storage, FlushInterval = {FlushLabel()}, CheckpointWalSize = {CheckpointLabel()} }} …)",
                 $"Recovered {_table?.Count ?? 0} rows from the snapshot and log.");
         }
-        catch (CorruptDatabaseException ex)
+        catch (BlazeDbCorruptDatabaseException ex)
         {
             await RecoverFromCorruptionAsync(ex);
         }
@@ -343,12 +343,12 @@
                 _db = null;
             }
 
-            _storage = new InMemoryStorage();
+            _storage = new BlazeDbInMemoryStorage();
             _nextRow = 1;
             _generation = 1;
             _log.Clear();
             await OpenAsync("opened empty");
-            _log.Add("Fresh storage", "new InMemoryStorage()", "Opening over empty storage writes a manifest that names an empty log; nothing else exists yet.");
+            _log.Add("Fresh storage", "new BlazeDbInMemoryStorage()", "Opening over empty storage writes a manifest that names an empty log; nothing else exists yet.");
         }
         finally
         {
@@ -596,7 +596,7 @@
                 $"{before} rows before → {_table?.Count ?? 0} rows recovered",
                 "The snapshot was loaded and the log replayed from its sequence number.");
         }
-        catch (CorruptDatabaseException ex)
+        catch (BlazeDbCorruptDatabaseException ex)
         {
             await RecoverFromCorruptionAsync(ex);
         }
@@ -651,7 +651,7 @@
                 $"{baseline + 10} rows in memory → {_table?.Count ?? 0} rows recovered",
                 "This is the durability window. Shrink FlushInterval, or call FlushAsync when a write matters.");
         }
-        catch (CorruptDatabaseException ex)
+        catch (BlazeDbCorruptDatabaseException ex)
         {
             await RecoverFromCorruptionAsync(ex);
         }
@@ -720,7 +720,7 @@
             _log.Ok("The database is fully usable", $"todos.Count → {_table.Count}",
                 "New writes append after the truncation point.");
         }
-        catch (CorruptDatabaseException ex)
+        catch (BlazeDbCorruptDatabaseException ex)
         {
             await RecoverFromCorruptionAsync(ex);
         }
@@ -770,7 +770,7 @@
                 $"{before} rows before → {_table?.Count ?? 0} rows recovered",
                 "Records before the bad checksum were applied; the damaged one and anything after it were discarded.");
         }
-        catch (CorruptDatabaseException ex)
+        catch (BlazeDbCorruptDatabaseException ex)
         {
             await RecoverFromCorruptionAsync(ex);
         }
@@ -809,17 +809,17 @@
             await OpenAsync("this should not be reached");
             _log.Error("Open succeeded", "unexpected - corruption went undetected");
         }
-        catch (CorruptDatabaseException ex)
+        catch (BlazeDbCorruptDatabaseException ex)
         {
             _log.Error(
                 "OpenAsync refused to open the database",
-                $"CorruptDatabaseException: {ex.Message}",
+                $"BlazeDbCorruptDatabaseException: {ex.Message}",
                 "The engine will not guess at damaged bytes. Recovering means restoring a backup or starting fresh.");
 
-            _storage = new InMemoryStorage();
+            _storage = new BlazeDbInMemoryStorage();
             _nextRow = 1;
             await OpenAsync("started fresh after unrecoverable corruption");
-            _log.Add("Started fresh", "new InMemoryStorage()", "The sandbox is reusable again.");
+            _log.Add("Started fresh", "new BlazeDbInMemoryStorage()", "The sandbox is reusable again.");
         }
         finally
         {
@@ -827,10 +827,10 @@
         }
     }
 
-    private async Task RecoverFromCorruptionAsync(CorruptDatabaseException ex)
+    private async Task RecoverFromCorruptionAsync(BlazeDbCorruptDatabaseException ex)
     {
-        _log.Error("CorruptDatabaseException", ex.Message, "Falling back to fresh storage so the sandbox stays usable.");
-        _storage = new InMemoryStorage();
+        _log.Error("BlazeDbCorruptDatabaseException", ex.Message, "Falling back to fresh storage so the sandbox stays usable.");
+        _storage = new BlazeDbInMemoryStorage();
         _nextRow = 1;
         await OpenAsync("started fresh after unrecoverable corruption");
     }
@@ -885,11 +885,11 @@
     private const string RecoverySnippet = """
         1. Read manifest.blz
              missing        -> brand new database, start empty
-             bad checksum   -> throw CorruptDatabaseException
+             bad checksum   -> throw BlazeDbCorruptDatabaseException
 
         2. Load the snapshot the manifest names
-             missing        -> throw CorruptDatabaseException
-             bad checksum   -> throw CorruptDatabaseException
+             missing        -> throw BlazeDbCorruptDatabaseException
+             bad checksum   -> throw BlazeDbCorruptDatabaseException
              ok             -> rebuild every table and index in memory
 
         3. Replay wal-N.blz from the snapshot's sequence number
@@ -897,6 +897,6 @@
                verify CRC   -> apply set or delete
                bad CRC or short read -> stop, truncate the remainder
 
-        4. Start the background flush loop and hand back the Database
+        4. Start the background flush loop and hand back the BlazeDbDatabase
         """;
 }

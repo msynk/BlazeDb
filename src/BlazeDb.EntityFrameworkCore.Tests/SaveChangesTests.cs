@@ -146,7 +146,7 @@ public class SaveChangesTests
         context.Orders.Add(new Order { Id = 10, PersonId = 1, Total = 42m });
         context.People.Add(new Person { Id = 2, Name = "Grace", City = "NY", Age = 45, Email = "ada@example.com" });
 
-        Assert.Throws<UniqueConstraintViolationException>(() => context.SaveChanges());
+        Assert.Throws<BlazeDbUniqueConstraintViolationException>(() => context.SaveChanges());
 
         // The order was applied before the conflicting person, so the rollback has to undo it.
         Assert.Null(test.Orders.Get(10));
@@ -176,8 +176,8 @@ public class SaveChangesTests
     [Fact]
     public async Task Changes_Survive_A_Reopen()
     {
-        var storage = new BlazeDb.Storage.InMemoryStorage();
-        var database = await Database.OpenAsync(new DatabaseOptions
+        var storage = new BlazeDb.Storage.BlazeDbInMemoryStorage();
+        var database = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = TimeSpan.FromHours(1),
@@ -192,7 +192,7 @@ public class SaveChangesTests
         await database.FlushAsync();
         await database.DisposeAsync();
 
-        await using var reopened = await Database.OpenAsync(new DatabaseOptions
+        await using var reopened = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = TimeSpan.FromHours(1),

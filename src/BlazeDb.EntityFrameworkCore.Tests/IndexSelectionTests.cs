@@ -19,14 +19,14 @@ public class IndexSelectionTests
         return (test, test.CreateContext());
     }
 
-    private static QueryPlan PlanFor<TEntity>(TestDatabase test, PeopleContext context, IQueryable<TEntity> query) =>
+    private static BlazeDbQueryPlan PlanFor<TEntity>(TestDatabase test, PeopleContext context, IQueryable<TEntity> query) =>
         TranslateFor(test, context, query).Plan;
 
-    private static TranslatedQuery TranslateFor<TEntity>(TestDatabase test, PeopleContext context, IQueryable<TEntity> query)
+    private static BlazeDbTranslatedQuery TranslateFor<TEntity>(TestDatabase test, PeopleContext context, IQueryable<TEntity> query)
     {
         var binding = BlazeDbTableResolver.CreateBinding(test.Database, context.Model.FindEntityType(typeof(TEntity))!);
-        var prepared = QueryPreparer.Prepare(query.Expression, out _);
-        return QueryTranslator.Translate(prepared, binding, typeof(TEntity));
+        var prepared = BlazeDbQueryPreparer.Prepare(query.Expression, out _);
+        return BlazeDbQueryTranslator.Translate(prepared, binding, typeof(TEntity));
     }
 
     [Fact]
@@ -230,7 +230,7 @@ public class IndexSelectionTests
         var captured = 42;
         Expression<Func<int>> expression = () => captured;
 
-        Assert.True(ExpressionEvaluator.TryEvaluate(expression.Body, out var value));
+        Assert.True(BlazeDbExpressionEvaluator.TryEvaluate(expression.Body, out var value));
         Assert.Equal(42, value);
     }
 
@@ -241,9 +241,9 @@ public class IndexSelectionTests
         Expression<Func<int>> independent = () => Math.Max(a, b) + 1;
         Expression<Func<Person, int>> dependent = p => Math.Max(p.Age, b);
 
-        Assert.True(ExpressionEvaluator.TryEvaluate(independent.Body, out var value));
+        Assert.True(BlazeDbExpressionEvaluator.TryEvaluate(independent.Body, out var value));
         Assert.Equal(10, value);
-        Assert.False(ExpressionEvaluator.TryEvaluate(dependent.Body, out _));
+        Assert.False(BlazeDbExpressionEvaluator.TryEvaluate(dependent.Body, out _));
     }
 
     [Fact]

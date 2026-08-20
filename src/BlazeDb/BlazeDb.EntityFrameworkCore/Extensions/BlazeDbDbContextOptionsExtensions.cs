@@ -8,11 +8,11 @@ namespace Microsoft.EntityFrameworkCore;
 public static class BlazeDbDbContextOptionsExtensions
 {
     /// <summary>
-    /// Points the context at an already-open <see cref="BlazeDb.Database"/>. The application owns
+    /// Points the context at an already-open <see cref="BlazeDb.BlazeDbDatabase"/>. The application owns
     /// its lifetime: BlazeDb holds the whole dataset in memory behind a single writer, so the
     /// database outlives any one context and is shared by all of them.
     /// </summary>
-    public static DbContextOptionsBuilder UseBlazeDb(this DbContextOptionsBuilder optionsBuilder, BlazeDb.Database database)
+    public static DbContextOptionsBuilder UseBlazeDb(this DbContextOptionsBuilder optionsBuilder, BlazeDb.BlazeDbDatabase database)
     {
         ArgumentNullException.ThrowIfNull(optionsBuilder);
         ArgumentNullException.ThrowIfNull(database);
@@ -25,9 +25,9 @@ public static class BlazeDbDbContextOptionsExtensions
         return optionsBuilder;
     }
 
-    /// <inheritdoc cref="UseBlazeDb(DbContextOptionsBuilder, BlazeDb.Database)"/>
+    /// <inheritdoc cref="UseBlazeDb(DbContextOptionsBuilder, BlazeDb.BlazeDbDatabase)"/>
     public static DbContextOptionsBuilder<TContext> UseBlazeDb<TContext>(
-        this DbContextOptionsBuilder<TContext> optionsBuilder, BlazeDb.Database database)
+        this DbContextOptionsBuilder<TContext> optionsBuilder, BlazeDb.BlazeDbDatabase database)
         where TContext : DbContext =>
         (DbContextOptionsBuilder<TContext>)UseBlazeDb((DbContextOptionsBuilder)optionsBuilder, database);
 }

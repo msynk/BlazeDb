@@ -16,10 +16,10 @@ public class WriteBenchmarks
     private const int Rows = 10_000;
     private const int BatchSize = 1_000;
 
-    private Database _memDb = null!;
-    private Table<int, BenchPerson> _memPeople = null!;
-    private Database _journaledDb = null!;
-    private Table<int, BenchPerson> _journaledPeople = null!;
+    private BlazeDbDatabase _memDb = null!;
+    private BlazeDbTable<int, BenchPerson> _memPeople = null!;
+    private BlazeDbDatabase _journaledDb = null!;
+    private BlazeDbTable<int, BenchPerson> _journaledPeople = null!;
     private SqliteConnection _sqlite = null!;
     private SqliteCommand _sqliteUpdate = null!;
     private int _cursor;
@@ -27,12 +27,12 @@ public class WriteBenchmarks
     [GlobalSetup]
     public async Task Setup()
     {
-        _memDb = await Database.OpenAsync(new DatabaseOptions().AddTable(BenchPerson.Table));
+        _memDb = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions().AddTable(BenchPerson.Table));
         _memPeople = _memDb.GetTable(BenchPerson.Table);
 
-        _journaledDb = await Database.OpenAsync(new DatabaseOptions
+        _journaledDb = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
-            Storage = new InMemoryStorage(),
+            Storage = new BlazeDbInMemoryStorage(),
             FlushInterval = TimeSpan.FromMilliseconds(100),
             CheckpointWalSize = long.MaxValue,
         }.AddTable(BenchPerson.Table));

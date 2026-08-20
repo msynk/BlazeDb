@@ -146,7 +146,7 @@
     private static readonly Case[] Cases =
     [
         new("dup", "Writes", "Inserting a key that already exists",
-            "table.Insert(row)", nameof(DuplicateKeyException),
+            "table.Insert(row)", nameof(BlazeDbDuplicateKeyException),
             "Insert refuses to overwrite. The check happens before anything reaches memory or the log, so the table is untouched.",
             static p => p.DuplicateKeyAsync()),
 
@@ -162,7 +162,7 @@
 
         new("unregistered", "Schema", "Asking for a table that was never registered",
             "db.GetTable(descriptor)", nameof(BlazeDbException),
-            "Tables are created when the database opens. A descriptor missing from DatabaseOptions is a configuration mistake, caught on first access.",
+            "Tables are created when the database opens. A descriptor missing from BlazeDbDatabaseOptions is a configuration mistake, caught on first access.",
             static p => p.UnregisteredTableAsync()),
 
         new("dup-table", "Schema", "Two tables with the same name",
@@ -171,7 +171,7 @@
             static p => p.DuplicateTableNameAsync()),
 
         new("empty-index", "Schema", "An index with a blank name",
-            "new HashIndexDefinition<T, TKey>(\"\", ...)", nameof(ArgumentException),
+            "new BlazeDbHashIndexDefinition<T, TKey>(\"\", ...)", nameof(ArgumentException),
             "Index names identify the index in Lookup and Range calls, so an empty one is rejected at construction.",
             static p => p.EmptyIndexNameAsync()),
 
@@ -211,23 +211,23 @@
             static p => p.MutateWhileScanningAsync()),
 
         new("corrupt-snapshot", "Persistence", "A snapshot with a flipped byte",
-            "Database.OpenAsync(options)", nameof(CorruptDatabaseException),
+            "BlazeDbDatabase.OpenAsync(options)", nameof(BlazeDbCorruptDatabaseException),
             "Snapshots carry a CRC32 over their whole body. A single altered byte is caught before any of it is loaded.",
             static p => p.CorruptSnapshotAsync()),
 
         new("corrupt-manifest", "Persistence", "A manifest with a broken header",
-            "Database.OpenAsync(options)", nameof(CorruptDatabaseException),
+            "BlazeDbDatabase.OpenAsync(options)", nameof(BlazeDbCorruptDatabaseException),
             "The manifest is the root of the file tree. It is validated by magic bytes, version and checksum before it is trusted.",
             static p => p.CorruptManifestAsync()),
 
         new("missing-snapshot", "Persistence", "A manifest pointing at a deleted snapshot",
-            "Database.OpenAsync(options)", nameof(CorruptDatabaseException),
+            "BlazeDbDatabase.OpenAsync(options)", nameof(BlazeDbCorruptDatabaseException),
             "Recovery will not quietly start from an empty state when the snapshot it was promised has gone.",
             static p => p.MissingSnapshotAsync()),
 
         new("unknown-wal-table", "Persistence", "A log referencing a table you dropped",
-            "Database.OpenAsync(options)", nameof(BlazeDbException),
-            "Replay names tables as strings. Removing a table from DatabaseOptions while its records are still in the log is caught rather than skipped.",
+            "BlazeDbDatabase.OpenAsync(options)", nameof(BlazeDbException),
+            "Replay names tables as strings. Removing a table from BlazeDbDatabaseOptions while its records are still in the log is caught rather than skipped.",
             static p => p.UnknownWalTableAsync()),
 
         new("truncated-row", "Persistence", "A row buffer that ends mid-field",
@@ -335,8 +335,8 @@
 
     private async Task<string> UnregisteredTableAsync()
     {
-        var options = new DatabaseOptions().AddTable(TodoEntry.Table);
-        await using var db = await Database.OpenAsync(options);
+        var options = new BlazeDbDatabaseOptions().AddTable(TodoEntry.Table);
+        await using var db = await BlazeDbDatabase.OpenAsync(options);
 
         db.GetTable(MetricTable.Descriptor);
 
@@ -345,17 +345,17 @@
 
     private async Task<string> DuplicateTableNameAsync()
     {
-        var options = new DatabaseOptions()
+        var options = new BlazeDbDatabaseOptions()
             .AddTable(TodoEntry.Table)
             .AddTable(TodoEntry.Table);
 
-        await using var db = await Database.OpenAsync(options);
+        await using var db = await BlazeDbDatabase.OpenAsync(options);
         return "The database opened with a duplicate table.";
     }
 
     private Task<string> EmptyIndexNameAsync()
     {
-        var index = new HashIndexDefinition<TodoEntry, bool>("", static r => r.Done);
+        var index = new BlazeDbHashIndexDefinition<TodoEntry, bool>("", static r => r.Done);
         return Task.FromResult($"Created an index named '{index.Name}'.");
     }
 
@@ -365,7 +365,7 @@
         var table = db.GetTable(TodoEntry.Table);
 
         // Same name, same selector, different object - the descriptor never saw it.
-        var lookalike = new HashIndexDefinition<TodoEntry, bool>("Done", static r => r.Done);
+        var lookalike = new BlazeDbHashIndexDefinition<TodoEntry, bool>("Done", static r => r.Done);
         var count = table.CountBy(lookalike, true);
 
         return $"CountBy returned {count}.";
@@ -396,7 +396,7 @@
 
     private async Task<string> CheckpointDuringTransactionAsync()
     {
-        await using var db = await DemoSandbox.OpenAsync(new InMemoryStorage());
+        await using var db = await DemoSandbox.OpenAsync(new BlazeDbInMemoryStorage());
         var table = db.GetTable(TodoEntry.Table);
 
         using var txn = db.BeginTransaction();
@@ -422,9 +422,9 @@
         await using var db = await DemoSandbox.OpenAsync();
         var table = db.GetTable(TodoEntry.Table);
 
-        var query = Query<Guid, TodoEntry>.From(table)
+        var query = BlazeDbQuery<Guid, TodoEntry>.From(table)
             .UseIndex(TodoEntry.Indexes.Done, true)
-            .UseIndex(TodoEntry.Indexes.Effort, Bound<int>.At(0), Bound<int>.Unbounded);
+            .UseIndex(TodoEntry.Indexes.Effort, BlazeDbBound<int>.At(0), BlazeDbBound<int>.Unbounded);
 
         return $"The query built with two sources and returned {query.Count()} rows.";
     }
@@ -449,7 +449,7 @@
 
     private async Task<string> CorruptSnapshotAsync()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using (var db = await DemoSandbox.OpenAsync(storage))
         {
             DemoData.Seed(db, db.GetTable(TodoEntry.Table), count: 6);
@@ -467,7 +467,7 @@
 
     private async Task<string> CorruptManifestAsync()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using (var db = await DemoSandbox.OpenAsync(storage))
         {
             DemoData.Seed(db, db.GetTable(TodoEntry.Table), count: 3);
@@ -482,7 +482,7 @@
 
     private async Task<string> MissingSnapshotAsync()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using (var db = await DemoSandbox.OpenAsync(storage))
         {
             DemoData.Seed(db, db.GetTable(TodoEntry.Table), count: 4);
@@ -498,7 +498,7 @@
 
     private async Task<string> UnknownWalTableAsync()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using (var db = await DemoSandbox.OpenAsync(storage))
         {
             db.GetTable(Setting.Table).Insert(new Setting
@@ -511,15 +511,15 @@
         }
 
         // The log still names "settings", but this schema no longer has it.
-        var narrowed = new DatabaseOptions { Storage = storage }.AddTable(TodoEntry.Table);
-        await using var reopened = await Database.OpenAsync(narrowed);
+        var narrowed = new BlazeDbDatabaseOptions { Storage = storage }.AddTable(TodoEntry.Table);
+        await using var reopened = await BlazeDbDatabase.OpenAsync(narrowed);
 
         return "Recovery skipped the unknown table.";
     }
 
     private Task<string> TruncatedRowAsync()
     {
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         TodoEntry.Table.RowWriter(writer, new TodoEntry
         {
             Id = Guid.NewGuid(),
@@ -531,7 +531,7 @@
         // The last field written is the length-delimited payload; drop its tail so the
         // declared length overruns what is actually there.
         var full = writer.ToArray();
-        var reader = new BufferReader(full.AsSpan(0, full.Length - 3));
+        var reader = new BlazeDbBufferReader(full.AsSpan(0, full.Length - 3));
         var row = TodoEntry.Table.RowReader(ref reader);
 
         return Task.FromResult($"Decoded a clipped buffer into Title = \"{row.Title}\".");
@@ -559,7 +559,7 @@
         """;
 
     private const string NullIndexSnippet = """
-        [Index]
+        [BlazeDbIndex]
         public string? Category { get; set; }
 
         table.Lookup(TodoEntry.Indexes.Category, null);   // always empty: nulls are not indexed
@@ -570,10 +570,10 @@
 
     private const string EmptySnippet = """
         table.Range(TodoEntry.Indexes.Effort,
-            Bound<int>.At(10_000),
-            Bound<int>.Unbounded);                // empty, not null
+            BlazeDbBound<int>.At(10_000),
+            BlazeDbBound<int>.Unbounded);                // empty, not null
 
-        Query<Guid, TodoEntry>.From(table)
+        BlazeDbQuery<Guid, TodoEntry>.From(table)
             .Where(static r => false)
             .FirstOrDefault();                    // null
         """;
@@ -581,24 +581,24 @@
     private const string OpenPatternSnippet = """
         try
         {
-            options.Storage = await OpfsStorage.CreateAsync("mydb");
+            options.Storage = await BlazeDbOpfsStorage.CreateAsync("mydb");
         }
-        catch (DatabaseLockedException)
+        catch (BlazeDbDatabaseLockedException)
         {
             // Another tab owns the write lock: open a read-only replica, or wait.
-            options.Storage = await OpfsStorage.CreateReadOnlyAsync("mydb");
+            options.Storage = await BlazeDbOpfsStorage.CreateReadOnlyAsync("mydb");
             options.ReadOnly = options.Storage is not null;
         }
 
         try
         {
-            return await Database.OpenAsync(options);
+            return await BlazeDbDatabase.OpenAsync(options);
         }
-        catch (CorruptDatabaseException ex)
+        catch (BlazeDbCorruptDatabaseException ex)
         {
             logger.LogError(ex, "Unreadable database; starting fresh.");
-            options.Storage = new InMemoryStorage();
-            return await Database.OpenAsync(options);
+            options.Storage = new BlazeDbInMemoryStorage();
+            return await BlazeDbDatabase.OpenAsync(options);
         }
         """;
 
@@ -607,7 +607,7 @@
         {
             await db.FlushAsync();
         }
-        catch (StorageQuotaExceededException ex)
+        catch (BlazeDbStorageQuotaExceededException ex)
         {
             ShowStorageFullWarning(ex.Quota);   // data is safe in memory; free space, retry
         }
@@ -632,7 +632,7 @@
             }
             txn.Commit();
         }
-        catch (DuplicateKeyException)
+        catch (BlazeDbDuplicateKeyException)
         {
             txn.Rollback();   // or just let the using block dispose
             throw;

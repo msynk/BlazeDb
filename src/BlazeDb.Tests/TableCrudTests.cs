@@ -39,7 +39,7 @@ public class TableCrudTests
         var people = db.GetTable(PersonTable.Descriptor);
         people.Insert(new Person(1, "Ada", 36));
 
-        var ex = Assert.Throws<DuplicateKeyException>(() => people.Insert(new Person(1, "Bob", 40)));
+        var ex = Assert.Throws<BlazeDbDuplicateKeyException>(() => people.Insert(new Person(1, "Bob", 40)));
         Assert.Equal("people", ex.TableName);
         Assert.Equal(new Person(1, "Ada", 36), people.Get(1));
     }
@@ -109,7 +109,7 @@ public class TableCrudTests
     [Fact]
     public async Task GetTable_Unregistered_Descriptor_Throws()
     {
-        await using var db = await Database.OpenAsync(new DatabaseOptions());
+        await using var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions());
 
         Assert.Throws<BlazeDbException>(() => db.GetTable(PersonTable.Descriptor));
     }
@@ -118,19 +118,19 @@ public class TableCrudTests
     public async Task Invalid_Options_Are_Rejected_Before_Opening()
     {
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
-            await Database.OpenAsync(new DatabaseOptions { FlushInterval = TimeSpan.Zero }));
+            await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions { FlushInterval = TimeSpan.Zero }));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
-            await Database.OpenAsync(new DatabaseOptions { CheckpointWalSize = 0 }));
+            await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions { CheckpointWalSize = 0 }));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
-            await Database.OpenAsync(new DatabaseOptions { QuotaReserveBytes = -1 }));
+            await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions { QuotaReserveBytes = -1 }));
         await Assert.ThrowsAsync<ArgumentException>(async () =>
-            await Database.OpenAsync(new DatabaseOptions { ReadOnly = true }));
+            await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions { ReadOnly = true }));
     }
 
     [Fact]
     public async Task A_Disposed_Database_Refuses_Further_Use()
     {
-        var db = await Database.OpenAsync(new DatabaseOptions { Storage = new InMemoryStorage() }.AddTable(PersonTable.Descriptor));
+        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions { Storage = new BlazeDbInMemoryStorage() }.AddTable(PersonTable.Descriptor));
         await db.DisposeAsync();
 
         Assert.Throws<ObjectDisposedException>(() => db.BeginTransaction());

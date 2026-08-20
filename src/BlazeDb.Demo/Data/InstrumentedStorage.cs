@@ -6,17 +6,17 @@ namespace BlazeDb.Demo.Data;
 public sealed record StorageOp(int Seq, string Operation, string File, int Bytes, double Ms, DateTime At);
 
 /// <summary>
-/// A decorator over any <see cref="IStorage"/> that records every call the engine
+/// A decorator over any <see cref="IBlazeDbStorage"/> that records every call the engine
 /// makes. This is the whole storage contract - four methods, plus the optional quota
 /// estimate that is passed straight through - so writing one is
 /// all it takes to put BlazeDb on a new backend.
 /// </summary>
-public sealed class InstrumentedStorage(IStorage inner, int capacity = 500) : IQuotaAwareStorage
+public sealed class InstrumentedStorage(IBlazeDbStorage inner, int capacity = 500) : IBlazeDbQuotaAwareStorage
 {
     private readonly List<StorageOp> _ops = [];
     private int _seq;
 
-    public IStorage Inner { get; } = inner;
+    public IBlazeDbStorage Inner { get; } = inner;
 
     /// <summary>Newest first.</summary>
     public IReadOnlyList<StorageOp> Ops => _ops;
@@ -71,8 +71,8 @@ public sealed class InstrumentedStorage(IStorage inner, int capacity = 500) : IQ
     }
 
     /// <summary>The origin's estimate when the wrapped backend can report one; not traced, since the engine treats it as advisory.</summary>
-    public ValueTask<StorageQuota?> GetQuotaAsync(CancellationToken cancellationToken = default) =>
-        Inner is IQuotaAwareStorage quotaAware ? quotaAware.GetQuotaAsync(cancellationToken) : default;
+    public ValueTask<BlazeDbStorageQuota?> GetQuotaAsync(CancellationToken cancellationToken = default) =>
+        Inner is IBlazeDbQuotaAwareStorage quotaAware ? quotaAware.GetQuotaAsync(cancellationToken) : default;
 
     private void Record(string operation, string name, int bytes, Stopwatch sw)
     {

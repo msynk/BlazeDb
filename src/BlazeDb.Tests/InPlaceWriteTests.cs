@@ -10,9 +10,9 @@ namespace BlazeDb.Tests;
 /// </summary>
 public class InPlaceWriteTests
 {
-    private static async Task<(Database Db, Table<int, Account> Accounts)> OpenAsync()
+    private static async Task<(BlazeDbDatabase Db, BlazeDbTable<int, Account> Accounts)> OpenAsync()
     {
-        var db = await Database.OpenAsync(new DatabaseOptions
+        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             FlushInterval = TimeSpan.FromHours(1),
         }.AddTable(Account.Table));
@@ -86,7 +86,7 @@ public class InPlaceWriteTests
         var before = new Account { Id = row.Id, Username = row.Username, TenantId = row.TenantId, Email = row.Email };
         row.Username = accounts.Get(1)!.Username;
 
-        Assert.Throws<UniqueConstraintViolationException>(() => accounts.UpdateInPlace(row, before));
+        Assert.Throws<BlazeDbUniqueConstraintViolationException>(() => accounts.UpdateInPlace(row, before));
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public class InPlaceWriteTests
         row.Username = accounts.Get(1)!.Username; // will be rejected
         row.TenantId = 1;
 
-        Assert.Throws<UniqueConstraintViolationException>(() => accounts.UpdateInPlace(row, before));
+        Assert.Throws<BlazeDbUniqueConstraintViolationException>(() => accounts.UpdateInPlace(row, before));
 
         // Nothing was written: the caller's instance is still the row (a change tracker keeps its
         // identity), and the indexes still describe the values it had before the mutation.

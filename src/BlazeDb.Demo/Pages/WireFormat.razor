@@ -283,7 +283,7 @@
 
             <Panel Title="The primitives" IconName="code">
                 <p class="small mb-2">
-                    <code>BufferWriter</code> and <code>BufferReader</code> are public, so a hand-written
+                    <code>BlazeDbBufferWriter</code> and <code>BlazeDbBufferReader</code> are public, so a hand-written
                     descriptor has exactly the same tools the generator uses.
                 </p>
                 <CodeBlock ShowHeader="false" Code="@PrimitivesSnippet" />
@@ -293,7 +293,7 @@
 </Section>
 
 @code {
-    private sealed record FieldRow(int Number, WireType Wire, int TagBytes, int PayloadBytes, int Offset);
+    private sealed record FieldRow(int Number, BlazeDbWireType Wire, int TagBytes, int PayloadBytes, int Offset);
 
     private sealed record HexLine(string Offset, string Bytes, string Ascii);
 
@@ -393,14 +393,14 @@
 
     private static byte[] Serialize(TodoEntry row)
     {
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         TodoEntry.Table.RowWriter(writer, row);
         return writer.ToArray();
     }
 
     private static TodoEntry Deserialize(byte[] bytes)
     {
-        var reader = new BufferReader(bytes);
+        var reader = new BlazeDbBufferReader(bytes);
         return TodoEntry.Table.RowReader(ref reader);
     }
 
@@ -408,7 +408,7 @@
     private static List<FieldRow> ParseFields(byte[] bytes)
     {
         var rows = new List<FieldRow>();
-        var reader = new BufferReader(bytes);
+        var reader = new BlazeDbBufferReader(bytes);
 
         while (reader.Remaining > 0)
         {
@@ -439,7 +439,7 @@
 
     private void EncodeSetting()
     {
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         Setting.Table.RowWriter(writer, new Setting
         {
             Name = "todos.sort",
@@ -454,15 +454,15 @@
     private void RoundTripKeys()
     {
         var key = new Guid("1f3c8b52-9d41-4a6e-8c07-5b2ad9e14f80");
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         TodoEntry.Table.KeyWriter(writer, key);
         var encoded = writer.ToArray();
         _keyBytes = encoded.Length;
 
-        var reader = new BufferReader(encoded);
+        var reader = new BlazeDbBufferReader(encoded);
         _keyMatched = TodoEntry.Table.KeyReader(ref reader) == key;
 
-        var stringWriter = new BufferWriter();
+        var stringWriter = new BlazeDbBufferWriter();
         Setting.Table.KeyWriter(stringWriter, "todos.sort");
         _stringKeyBytes = stringWriter.Length;
     }
@@ -473,18 +473,18 @@
     {
         var row = BuildRow();
 
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         TodoEntry.Table.RowWriter(writer, row);
         var baseline = writer.Length;
 
         // A field this build has never seen, exactly as a future version would write it.
-        writer.WriteTag(999, WireType.LengthDelimited);
+        writer.WriteTag(999, BlazeDbWireType.LengthDelimited);
         writer.WriteString("a column added in a later release");
-        writer.WriteTag(1000, WireType.VarInt);
+        writer.WriteTag(1000, BlazeDbWireType.VarInt);
         writer.WriteVarInt(42);
 
         var extended = writer.ToArray();
-        var reader = new BufferReader(extended);
+        var reader = new BlazeDbBufferReader(extended);
         var decoded = TodoEntry.Table.RowReader(ref reader);
 
         _forwardResult =
@@ -500,7 +500,7 @@
 
         try
         {
-            var reader = new BufferReader(malformed);
+            var reader = new BlazeDbBufferReader(malformed);
             var (number, wire) = reader.ReadTag();
             var payload = reader.ReadBytes();
             _truncatedResult = $"Unexpectedly read field {number} ({wire}) with {payload.Length} bytes.";
@@ -518,11 +518,11 @@
     private static string PropertyName(int number) =>
         number > 0 && number < PropertyNames.Length ? PropertyNames[number] : $"unknown ({number})";
 
-    private static string WireTone(WireType wire) => wire switch
+    private static string WireTone(BlazeDbWireType wire) => wire switch
     {
-        WireType.VarInt => "info",
-        WireType.Fixed64 => "accent",
-        WireType.Fixed32 => "accent",
+        BlazeDbWireType.VarInt => "info",
+        BlazeDbWireType.Fixed64 => "accent",
+        BlazeDbWireType.Fixed32 => "accent",
         _ => "ok",
     };
 
@@ -545,23 +545,23 @@
         """;
 
     private const string ForwardSnippet = """
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         TodoEntry.Table.RowWriter(writer, row);
 
         // Pretend a newer build appended fields we know nothing about.
-        writer.WriteTag(999, WireType.LengthDelimited);
+        writer.WriteTag(999, BlazeDbWireType.LengthDelimited);
         writer.WriteString("a column added in a later release");
 
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         var decoded = TodoEntry.Table.RowReader(ref reader);
         // Succeeds - the unknown tag is skipped by wire type alone.
         """;
 
     private const string KeySnippet = """
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         TodoEntry.Table.KeyWriter(writer, key);
 
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         var same = TodoEntry.Table.KeyReader(ref reader);
         """;
 

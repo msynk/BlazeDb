@@ -252,15 +252,15 @@
 
     private readonly List<BenchResult> _results = [];
 
-    private Database? _db;
-    private Table<Guid, TodoEntry>? _table;
+    private BlazeDbDatabase? _db;
+    private BlazeDbTable<Guid, TodoEntry>? _table;
     private Guid[] _ids = [];
     private int _rowCount;
     private int _requestedRows = 10_000;
     private int _scale = 1;
 
-    private Database? _durable;
-    private InMemoryStorage? _durableStorage;
+    private BlazeDbDatabase? _durable;
+    private BlazeDbInMemoryStorage? _durableStorage;
 
     private SpaceReport? _space;
     private bool _busy;
@@ -326,7 +326,7 @@
             DemoData.SeedForBench(_db, _table, _requestedRows, out _ids);
             _rowCount = _table.Count;
 
-            _durableStorage = new InMemoryStorage();
+            _durableStorage = new BlazeDbInMemoryStorage();
             _durable = await DemoSandbox.OpenAsync(_durableStorage, flushInterval: TimeSpan.FromMilliseconds(50));
         }
         finally
@@ -364,7 +364,7 @@
         }
     }
 
-    private async Task RunSuiteAsync(Table<Guid, TodoEntry> table, Guid[] ids, Database durable)
+    private async Task RunSuiteAsync(BlazeDbTable<Guid, TodoEntry> table, Guid[] ids, BlazeDbDatabase durable)
     {
         var durableTable = durable.GetTable(TodoEntry.Table);
         var scale = _scale;
@@ -438,7 +438,7 @@
         {
             for (var i = 0; i < ops; i++)
             {
-                foreach (var row in table.Range(TodoEntry.Indexes.Effort, Bound<int>.At(20), Bound<int>.At(60)))
+                foreach (var row in table.Range(TodoEntry.Indexes.Effort, BlazeDbBound<int>.At(20), BlazeDbBound<int>.At(60)))
                 {
                     sink += row.Effort;
                 }
@@ -463,8 +463,8 @@
         {
             for (var i = 0; i < ops; i++)
             {
-                var rows = Query<Guid, TodoEntry>.From(table)
-                    .UseIndex(TodoEntry.Indexes.Effort, Bound<int>.At(20), Bound<int>.At(60))
+                var rows = BlazeDbQuery<Guid, TodoEntry>.From(table)
+                    .UseIndex(TodoEntry.Indexes.Effort, BlazeDbBound<int>.At(20), BlazeDbBound<int>.At(60))
                     .Where(static r => !r.Done)
                     .Take(20)
                     .ToList();
@@ -528,7 +528,7 @@
 
         // ---- Serialization ----
 
-        var writer = new BufferWriter(1024);
+        var writer = new BlazeDbBufferWriter(1024);
         var sample = table.Get(ids[0])!;
 
         await Step("Serialization", "Encode a row", "descriptor.RowWriter into a reused buffer", 200_000 * scale, ops =>
@@ -549,7 +549,7 @@
         {
             for (var i = 0; i < ops; i++)
             {
-                var reader = new BufferReader(encoded);
+                var reader = new BlazeDbBufferReader(encoded);
                 sink += TodoEntry.Table.RowReader(ref reader).Effort;
             }
         });
@@ -579,7 +579,7 @@
         StateHasChanged();
         await Task.Yield();
 
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using var db = await DemoSandbox.OpenAsync(storage, flushInterval: TimeSpan.FromHours(1));
         var table = db.GetTable(TodoEntry.Table);
         var rows = Math.Min(_rowCount, 20_000);
@@ -590,7 +590,7 @@
             table.Insert(NewRow(i));
         }
 
-        var writer = new BufferWriter(1024);
+        var writer = new BlazeDbBufferWriter(1024);
         long rowTotal = 0;
         foreach (var row in table.Scan())
         {

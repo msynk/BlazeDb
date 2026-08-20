@@ -5,9 +5,9 @@ using Xunit;
 namespace BlazeDb.Tests;
 
 /// <summary>An in-memory backend with a settable allowance, standing in for the browser's estimate.</summary>
-internal sealed class QuotaLimitedStorage : IQuotaAwareStorage
+internal sealed class QuotaLimitedStorage : IBlazeDbQuotaAwareStorage
 {
-    private readonly InMemoryStorage _inner = new();
+    private readonly BlazeDbInMemoryStorage _inner = new();
     private readonly Dictionary<string, int> _sizes = [];
 
     public long QuotaBytes { get; set; } = long.MaxValue;
@@ -25,10 +25,10 @@ internal sealed class QuotaLimitedStorage : IQuotaAwareStorage
         }
     }
 
-    public ValueTask<StorageQuota?> GetQuotaAsync(CancellationToken cancellationToken = default)
+    public ValueTask<BlazeDbStorageQuota?> GetQuotaAsync(CancellationToken cancellationToken = default)
     {
         EstimateCalls++;
-        return new ValueTask<StorageQuota?>(new StorageQuota(UsageBytes, QuotaBytes));
+        return new ValueTask<BlazeDbStorageQuota?>(new BlazeDbStorageQuota(UsageBytes, QuotaBytes));
     }
 
     public ValueTask<byte[]?> ReadAsync(string name, CancellationToken cancellationToken = default) =>
@@ -81,21 +81,21 @@ internal sealed class QuotaLimitedStorage : IQuotaAwareStorage
 
 public class QuotaTests
 {
-    private static async Task<(Database Db, Table<Guid, TodoItem> Todos)> OpenAsync(
-        QuotaLimitedStorage storage, Action<DatabaseOptions>? configure = null)
+    private static async Task<(BlazeDbDatabase Db, BlazeDbTable<Guid, TodoItem> Todos)> OpenAsync(
+        QuotaLimitedStorage storage, Action<BlazeDbDatabaseOptions>? configure = null)
     {
-        var options = new DatabaseOptions
+        var options = new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = TimeSpan.FromHours(1),
             QuotaReserveBytes = 0,
         }.AddTable(TodoItem.Table);
         configure?.Invoke(options);
-        var db = await Database.OpenAsync(options);
+        var db = await BlazeDbDatabase.OpenAsync(options);
         return (db, db.GetTable(TodoItem.Table));
     }
 
-    private static void Fill(Table<Guid, TodoItem> todos, int rows)
+    private static void Fill(BlazeDbTable<Guid, TodoItem> todos, int rows)
     {
         for (var i = 0; i < rows; i++)
         {
@@ -123,9 +123,9 @@ public class QuotaTests
     [Fact]
     public async Task Quota_Is_Null_For_Backends_That_Cannot_Report_It()
     {
-        var db = await Database.OpenAsync(new DatabaseOptions
+        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
-            Storage = new InMemoryStorage(),
+            Storage = new BlazeDbInMemoryStorage(),
             FlushInterval = TimeSpan.FromHours(1),
         }.AddTable(TodoItem.Table));
         await using var owned = db;
@@ -142,7 +142,7 @@ public class QuotaTests
 
         Fill(todos, 100);
 
-        var ex = await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
+        var ex = await Assert.ThrowsAsync<BlazeDbStorageQuotaExceededException>(async () => await db.FlushAsync());
         Assert.True(ex.RequiredBytes > 0);
         Assert.Equal(4_000, ex.Quota.QuotaBytes);
 
@@ -159,7 +159,7 @@ public class QuotaTests
         await using var owned = db;
         Fill(todos, 100);
 
-        await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
+        await Assert.ThrowsAsync<BlazeDbStorageQuotaExceededException>(async () => await db.FlushAsync());
 
         // The engine degraded rather than failing the application: reads and writes still work.
         Assert.Equal(100, todos.Count);
@@ -176,14 +176,14 @@ public class QuotaTests
         var (db, todos) = await OpenAsync(storage);
         await using var owned = db;
         Fill(todos, 100);
-        await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
+        await Assert.ThrowsAsync<BlazeDbStorageQuotaExceededException>(async () => await db.FlushAsync());
 
         storage.QuotaBytes = 10_000_000;
         await db.FlushAsync();
 
         // Nothing was dropped on the way: a reopen sees every row.
         await db.DisposeAsync();
-        var reopened = await Database.OpenAsync(new DatabaseOptions
+        var reopened = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = TimeSpan.FromHours(1),
@@ -195,13 +195,13 @@ public class QuotaTests
     [Fact]
     public async Task Pressure_Callback_Reports_The_Offending_Quota()
     {
-        StorageQuota? reported = null;
+        BlazeDbStorageQuota? reported = null;
         var storage = new QuotaLimitedStorage { QuotaBytes = 4_000 };
         var (db, todos) = await OpenAsync(storage, o => o.OnQuotaPressure = q => reported = q);
         await using var owned = db;
         Fill(todos, 100);
 
-        await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
+        await Assert.ThrowsAsync<BlazeDbStorageQuotaExceededException>(async () => await db.FlushAsync());
 
         Assert.NotNull(reported);
         Assert.Equal(4_000, reported!.Value.QuotaBytes);
@@ -219,8 +219,8 @@ public class QuotaTests
         Fill(todos, 100);
 
         // The background flusher would retry every tick; the application hears about it once.
-        await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
-        await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
+        await Assert.ThrowsAsync<BlazeDbStorageQuotaExceededException>(async () => await db.FlushAsync());
+        await Assert.ThrowsAsync<BlazeDbStorageQuotaExceededException>(async () => await db.FlushAsync());
         Assert.Equal(1, reports);
 
         // Space is freed, the flush succeeds, and a later refusal is a new episode. (The limit is
@@ -231,7 +231,7 @@ public class QuotaTests
         storage.QuotaBytes = storage.UsageBytes + 100;
         await db.GetStorageQuotaAsync();
         Fill(todos, 100);
-        await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
+        await Assert.ThrowsAsync<BlazeDbStorageQuotaExceededException>(async () => await db.FlushAsync());
         Assert.Equal(2, reports);
 
         storage.QuotaBytes = long.MaxValue;
@@ -252,7 +252,7 @@ public class QuotaTests
         // between the flush and the limit. The bytes would physically fit; they would just leave
         // less than the reserve behind.
         using var tx = db.BeginTransaction();
-        await Assert.ThrowsAsync<StorageQuotaExceededException>(async () => await db.FlushAsync());
+        await Assert.ThrowsAsync<BlazeDbStorageQuotaExceededException>(async () => await db.FlushAsync());
 
         tx.Rollback();
         storage.QuotaBytes = long.MaxValue;
@@ -281,7 +281,7 @@ public class QuotaTests
         // Everything is durable: reopening replays what compaction left behind.
         await db.FlushAsync();
         await db.DisposeAsync();
-        var reopened = await Database.OpenAsync(new DatabaseOptions
+        var reopened = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = TimeSpan.FromHours(1),

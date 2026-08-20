@@ -25,13 +25,13 @@ internal sealed class BlazeDbQueryExecutor
 
     public object? Execute(Expression query, DbContext context)
     {
-        query = QueryPreparer.Prepare(query, out var trackingOverride);
+        query = BlazeDbQueryPreparer.Prepare(query, out var trackingOverride);
 
-        var root = QueryPreparer.FindRoot(query);
+        var root = BlazeDbQueryPreparer.FindRoot(query);
         var entityType = root.EntityType;
         var binding = _tables.GetBinding(entityType);
 
-        var translated = QueryTranslator.Translate(query, binding, entityType.ClrType);
+        var translated = BlazeDbQueryTranslator.Translate(query, binding, entityType.ClrType);
         var rows = binding.Execute(translated.Plan);
 
         if (ShouldTrack(query, entityType, context, trackingOverride))
@@ -46,7 +46,7 @@ internal sealed class BlazeDbQueryExecutor
         }
 
         var source = Expression.Constant(queryable, typeof(IQueryable<>).MakeGenericType(binding.RowType));
-        var remainder = new RowsPlaceholderReplacer(source).Visit(translated.Remainder)!;
+        var remainder = new BlazeDbRowsPlaceholderReplacer(source).Visit(translated.Remainder)!;
 
         // A remainder that still describes a sequence has to be handed back as a query rather than
         // run: LINQ to Objects only evaluates the operators that reduce one to a value.

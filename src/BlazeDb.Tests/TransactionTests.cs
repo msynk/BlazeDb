@@ -158,7 +158,7 @@ public class TransactionTests
         using (var txn = db.BeginTransaction())
         {
             people.Insert(new Person(2, "Grace", 45));
-            Assert.Throws<DuplicateKeyException>(() => people.Insert(new Person(1, "Dup", 0)));
+            Assert.Throws<BlazeDbDuplicateKeyException>(() => people.Insert(new Person(1, "Dup", 0)));
             txn.Rollback();
         }
 

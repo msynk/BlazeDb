@@ -9,12 +9,12 @@ namespace BlazeDb.Demo.Data;
 /// </summary>
 public static class DemoSandbox
 {
-    public static DatabaseOptions BuildOptions(
-        IStorage? storage = null,
+    public static BlazeDbDatabaseOptions BuildOptions(
+        IBlazeDbStorage? storage = null,
         TimeSpan? flushInterval = null,
         long? checkpointWalSize = null)
     {
-        var options = new DatabaseOptions { Storage = storage };
+        var options = new BlazeDbDatabaseOptions { Storage = storage };
 
         if (flushInterval is { } interval)
         {
@@ -32,11 +32,11 @@ public static class DemoSandbox
             .AddTable(MetricTable.Descriptor);
     }
 
-    public static ValueTask<Database> OpenAsync(
-        IStorage? storage = null,
+    public static ValueTask<BlazeDbDatabase> OpenAsync(
+        IBlazeDbStorage? storage = null,
         TimeSpan? flushInterval = null,
         long? checkpointWalSize = null) =>
-        Database.OpenAsync(BuildOptions(storage, flushInterval, checkpointWalSize));
+        BlazeDbDatabase.OpenAsync(BuildOptions(storage, flushInterval, checkpointWalSize));
 
     public static string Bytes(long value) => value switch
     {
@@ -90,7 +90,7 @@ public static class DemoData
     /// Seeds sample rows in a single transaction, which is both the fastest way
     /// to bulk load and a nice demonstration of batch atomicity.
     /// </summary>
-    public static int Seed(Database database, Table<Guid, TodoEntry> table, int count = 22, int seed = 20260817)
+    public static int Seed(BlazeDbDatabase database, BlazeDbTable<Guid, TodoEntry> table, int count = 22, int seed = 20260817)
     {
         var random = new Random(seed);
         var created = DateTime.UtcNow.AddDays(-Rows.Length);
@@ -131,7 +131,7 @@ public static class DemoData
     }
 
     /// <summary>Minimal rows for benchmarking, cheap to build in bulk.</summary>
-    public static void SeedForBench(Database database, Table<Guid, TodoEntry> table, int count, out Guid[] ids)
+    public static void SeedForBench(BlazeDbDatabase database, BlazeDbTable<Guid, TodoEntry> table, int count, out Guid[] ids)
     {
         ids = new Guid[count];
         var created = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);

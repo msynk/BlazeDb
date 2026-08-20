@@ -27,9 +27,9 @@ public class SourceGeneratorTests
 
     private static TodoItem Roundtrip(TodoItem item)
     {
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         TodoItem.Table.RowWriter(writer, item);
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         return TodoItem.Table.RowReader(ref reader);
     }
 
@@ -90,9 +90,9 @@ public class SourceGeneratorTests
     public void Generated_Key_Serializer_Roundtrips()
     {
         var id = Guid.NewGuid();
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         TodoItem.Table.KeyWriter(writer, id);
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         Assert.Equal(id, TodoItem.Table.KeyReader(ref reader));
     }
 
@@ -103,15 +103,15 @@ public class SourceGeneratorTests
         Assert.Contains(TodoItem.Indexes.Done, TodoItem.Table.Indexes);
         Assert.Contains(TodoItem.Indexes.Category, TodoItem.Table.Indexes);
         Assert.Contains(TodoItem.Indexes.CreatedAt, TodoItem.Table.Indexes);
-        Assert.IsType<HashIndexDefinition<TodoItem, bool>>(TodoItem.Indexes.Done);
-        Assert.IsType<HashIndexDefinition<TodoItem, string?>>(TodoItem.Indexes.Category);
-        Assert.IsType<OrderedIndexDefinition<TodoItem, DateTime>>(TodoItem.Indexes.CreatedAt);
+        Assert.IsType<BlazeDbHashIndexDefinition<TodoItem, bool>>(TodoItem.Indexes.Done);
+        Assert.IsType<BlazeDbHashIndexDefinition<TodoItem, string?>>(TodoItem.Indexes.Category);
+        Assert.IsType<BlazeDbOrderedIndexDefinition<TodoItem, DateTime>>(TodoItem.Indexes.CreatedAt);
     }
 
     [Fact]
     public async Task Generated_Table_Works_End_To_End_In_A_Database()
     {
-        await using var db = await Database.OpenAsync(new DatabaseOptions().AddTable(TodoItem.Table));
+        await using var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions().AddTable(TodoItem.Table));
         var todos = db.GetTable(TodoItem.Table);
         var item = SampleTodo();
 
@@ -126,18 +126,18 @@ public class SourceGeneratorTests
         Assert.Equal("Setting", Setting.Table.Name);
 
         var setting = new Setting { Name = "theme", Value = "dark" };
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         Setting.Table.RowWriter(writer, setting);
 
         // Verify the explicit field numbers are on the wire.
-        var raw = new BufferReader(writer.WrittenSpan);
+        var raw = new BlazeDbBufferReader(writer.WrittenSpan);
         var (field1, _) = raw.ReadTag();
         Assert.Equal(5, field1);
-        raw.SkipField(WireType.LengthDelimited);
+        raw.SkipField(BlazeDbWireType.LengthDelimited);
         var (field2, _) = raw.ReadTag();
         Assert.Equal(9, field2);
 
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         var decoded = Setting.Table.RowReader(ref reader);
         Assert.Equal("theme", decoded.Name);
         Assert.Equal("dark", decoded.Value);
@@ -147,13 +147,13 @@ public class SourceGeneratorTests
     public void Old_Readers_Skip_Fields_Added_By_Newer_Writers()
     {
         // Simulate a newer schema writing an extra unknown field before known data.
-        var writer = new BufferWriter();
-        writer.WriteTag(200, WireType.LengthDelimited);
+        var writer = new BlazeDbBufferWriter();
+        writer.WriteTag(200, BlazeDbWireType.LengthDelimited);
         writer.WriteString("from-the-future");
         var setting = new Setting { Name = "a", Value = "b" };
         Setting.Table.RowWriter(writer, setting);
 
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         var decoded = Setting.Table.RowReader(ref reader);
         Assert.Equal("a", decoded.Name);
         Assert.Equal("b", decoded.Value);
@@ -165,13 +165,13 @@ public class SourceGeneratorTests
         // Simulate a schema in which Setting.Value (field 9, a string) used to be an integer. The
         // reader must not try to decode a varint as a length-prefixed string - which would either
         // throw or desynchronize every field after it - but treat it as unknown and move on.
-        var writer = new BufferWriter();
-        writer.WriteTag(9, WireType.VarInt);
+        var writer = new BlazeDbBufferWriter();
+        writer.WriteTag(9, BlazeDbWireType.VarInt);
         writer.WriteVarInt(12345);
-        writer.WriteTag(5, WireType.LengthDelimited);
+        writer.WriteTag(5, BlazeDbWireType.LengthDelimited);
         writer.WriteString("name-after-the-changed-field");
 
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         var decoded = Setting.Table.RowReader(ref reader);
 
         Assert.Equal("name-after-the-changed-field", decoded.Name);

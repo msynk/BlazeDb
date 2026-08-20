@@ -9,13 +9,13 @@ namespace BlazeDb.EntityFrameworkCore.Tests;
 /// </summary>
 internal sealed class TestDatabase : IAsyncDisposable
 {
-    private TestDatabase(Database database) => Database = database;
+    private TestDatabase(BlazeDbDatabase database) => Database = database;
 
-    public Database Database { get; }
+    public BlazeDbDatabase Database { get; }
 
     public static async Task<TestDatabase> OpenAsync()
     {
-        var database = await Database.OpenAsync(new DatabaseOptions
+        var database = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
             {
                 FlushInterval = TimeSpan.FromHours(1),
             }
@@ -28,11 +28,11 @@ internal sealed class TestDatabase : IAsyncDisposable
     public PeopleContext CreateContext() =>
         new(new DbContextOptionsBuilder<PeopleContext>().UseBlazeDb(Database).Options);
 
-    public Table<int, Person> People => Database.GetTable(Person.Table);
+    public BlazeDbTable<int, Person> People => Database.GetTable(Person.Table);
 
-    public Table<int, Order> Orders => Database.GetTable(Order.Table);
+    public BlazeDbTable<int, Order> Orders => Database.GetTable(Order.Table);
 
-    public Table<string, Tag> Tags => Database.GetTable(Tag.Table);
+    public BlazeDbTable<string, Tag> Tags => Database.GetTable(Tag.Table);
 
     public ValueTask DisposeAsync() => Database.DisposeAsync();
 }

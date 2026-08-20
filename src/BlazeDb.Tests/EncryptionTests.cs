@@ -15,13 +15,13 @@ public class EncryptionTests
         return key;
     }
 
-    private static EncryptedStorage Wrap(IStorage inner, byte seed = 1) =>
-        new(inner, new AesGcmCipher(Key(seed)), ownsCipher: true);
+    private static BlazeDbEncryptedStorage Wrap(IBlazeDbStorage inner, byte seed = 1) =>
+        new(inner, new BlazeDbAesGcmCipher(Key(seed)), ownsCipher: true);
 
     [Fact]
     public async Task Roundtrips_An_Atomic_Write()
     {
-        var inner = new InMemoryStorage();
+        var inner = new BlazeDbInMemoryStorage();
         using var storage = Wrap(inner);
         var payload = Encoding.UTF8.GetBytes("the quick brown fox");
 
@@ -33,7 +33,7 @@ public class EncryptionTests
     [Fact]
     public async Task Ciphertext_Does_Not_Contain_The_Plaintext()
     {
-        var inner = new InMemoryStorage();
+        var inner = new BlazeDbInMemoryStorage();
         using var storage = Wrap(inner);
         var payload = Encoding.UTF8.GetBytes("super-secret-value");
 
@@ -48,7 +48,7 @@ public class EncryptionTests
     [Fact]
     public async Task Appends_Concatenate_Back_Into_One_Stream()
     {
-        var inner = new InMemoryStorage();
+        var inner = new BlazeDbInMemoryStorage();
         using var storage = Wrap(inner);
 
         await storage.AppendAsync("wal", "alpha"u8.ToArray());
@@ -62,7 +62,7 @@ public class EncryptionTests
     [Fact]
     public async Task Each_Write_Uses_A_Fresh_Nonce()
     {
-        var inner = new InMemoryStorage();
+        var inner = new BlazeDbInMemoryStorage();
         using var storage = Wrap(inner);
 
         await storage.AppendAsync("wal", "same"u8.ToArray());
@@ -76,7 +76,7 @@ public class EncryptionTests
     [Fact]
     public async Task Missing_File_Still_Reads_As_Null()
     {
-        using var storage = Wrap(new InMemoryStorage());
+        using var storage = Wrap(new BlazeDbInMemoryStorage());
         Assert.Null(await storage.ReadAsync("nope"));
     }
 
@@ -87,27 +87,27 @@ public class EncryptionTests
         using var quotaAware = Wrap(new QuotaLimitedStorage { QuotaBytes = 1234 });
         Assert.Equal(1234, (await quotaAware.GetQuotaAsync())!.Value.QuotaBytes);
 
-        using var plain = Wrap(new InMemoryStorage());
+        using var plain = Wrap(new BlazeDbInMemoryStorage());
         Assert.Null(await plain.GetQuotaAsync());
     }
 
     [Fact]
     public async Task Wrong_Key_Is_Reported_As_Corruption()
     {
-        var inner = new InMemoryStorage();
+        var inner = new BlazeDbInMemoryStorage();
         using (var writer = Wrap(inner, seed: 1))
         {
             await writer.WriteAtomicAsync("snapshot", "payload"u8.ToArray());
         }
 
         using var reader = Wrap(inner, seed: 2);
-        await Assert.ThrowsAsync<CorruptDatabaseException>(async () => await reader.ReadAsync("snapshot"));
+        await Assert.ThrowsAsync<BlazeDbCorruptDatabaseException>(async () => await reader.ReadAsync("snapshot"));
     }
 
     [Fact]
     public async Task Tampered_Ciphertext_Is_Reported_As_Corruption()
     {
-        var inner = new InMemoryStorage();
+        var inner = new BlazeDbInMemoryStorage();
         using var storage = Wrap(inner);
         await storage.WriteAtomicAsync("snapshot", "payload"u8.ToArray());
 
@@ -115,26 +115,26 @@ public class EncryptionTests
         stored[^1] ^= 0xFF;
         await inner.WriteAtomicAsync("snapshot", stored);
 
-        await Assert.ThrowsAsync<CorruptDatabaseException>(async () => await storage.ReadAsync("snapshot"));
+        await Assert.ThrowsAsync<BlazeDbCorruptDatabaseException>(async () => await storage.ReadAsync("snapshot"));
     }
 
     [Fact]
     public async Task A_Frame_Cannot_Be_Replayed_Into_Another_File()
     {
-        var inner = new InMemoryStorage();
+        var inner = new BlazeDbInMemoryStorage();
         using var storage = Wrap(inner);
         await storage.WriteAtomicAsync("wal", "payload"u8.ToArray());
 
         // The file name is bound in as associated data, so moving the bytes breaks the seal.
         await inner.WriteAtomicAsync("snapshot", (await inner.ReadAsync("wal"))!);
 
-        await Assert.ThrowsAsync<CorruptDatabaseException>(async () => await storage.ReadAsync("snapshot"));
+        await Assert.ThrowsAsync<BlazeDbCorruptDatabaseException>(async () => await storage.ReadAsync("snapshot"));
     }
 
     [Fact]
     public async Task A_Torn_Trailing_Frame_Is_Ignored()
     {
-        var inner = new InMemoryStorage();
+        var inner = new BlazeDbInMemoryStorage();
         using var storage = Wrap(inner);
         await storage.AppendAsync("wal", "committed"u8.ToArray());
         var complete = (await inner.ReadAsync("wal"))!;
@@ -150,12 +150,12 @@ public class EncryptionTests
     [Fact]
     public async Task A_Database_Round_Trips_Through_Encrypted_Storage()
     {
-        var inner = new InMemoryStorage();
+        var inner = new BlazeDbInMemoryStorage();
         var id = Guid.NewGuid();
 
         using (var storage = Wrap(inner))
         {
-            var db = await Database.OpenAsync(new DatabaseOptions
+            var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
             {
                 Storage = storage,
                 FlushInterval = TimeSpan.FromHours(1),
@@ -172,7 +172,7 @@ public class EncryptionTests
 
         using (var storage = Wrap(inner))
         {
-            var reopened = await Database.OpenAsync(new DatabaseOptions
+            var reopened = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
             {
                 Storage = storage,
                 FlushInterval = TimeSpan.FromHours(1),
@@ -186,15 +186,15 @@ public class EncryptionTests
     [Fact]
     public async Task Encrypted_Database_Survives_A_Checkpoint()
     {
-        var inner = new InMemoryStorage();
+        var inner = new BlazeDbInMemoryStorage();
         using var storage = Wrap(inner);
-        var options = new DatabaseOptions
+        var options = new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = TimeSpan.FromHours(1),
         }.AddTable(TodoItem.Table);
 
-        var db = await Database.OpenAsync(options);
+        var db = await BlazeDbDatabase.OpenAsync(options);
         var todos = db.GetTable(TodoItem.Table);
         for (var i = 0; i < 50; i++)
         {
@@ -203,7 +203,7 @@ public class EncryptionTests
         await db.CheckpointAsync();
         await db.DisposeAsync();
 
-        var reopened = await Database.OpenAsync(new DatabaseOptions
+        var reopened = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = TimeSpan.FromHours(1),
@@ -219,9 +219,9 @@ public class EncryptionTests
         var salt = "0123456789abcdef"u8.ToArray();
         var other = "fedcba9876543210"u8.ToArray();
 
-        var a = EncryptedStorage.DeriveKey("correct horse battery staple", salt, iterations: 1000);
-        var b = EncryptedStorage.DeriveKey("correct horse battery staple", salt, iterations: 1000);
-        var c = EncryptedStorage.DeriveKey("correct horse battery staple", other, iterations: 1000);
+        var a = BlazeDbEncryptedStorage.DeriveKey("correct horse battery staple", salt, iterations: 1000);
+        var b = BlazeDbEncryptedStorage.DeriveKey("correct horse battery staple", salt, iterations: 1000);
+        var c = BlazeDbEncryptedStorage.DeriveKey("correct horse battery staple", other, iterations: 1000);
 
         Assert.Equal(a, b);
         Assert.NotEqual(a, c);
@@ -231,24 +231,24 @@ public class EncryptionTests
     [Fact]
     public void Derive_Key_Rejects_Weak_Inputs()
     {
-        Assert.Throws<ArgumentException>(() => EncryptedStorage.DeriveKey("", "0123456789abcdef"u8));
-        Assert.Throws<ArgumentException>(() => EncryptedStorage.DeriveKey("passphrase", "short"u8));
+        Assert.Throws<ArgumentException>(() => BlazeDbEncryptedStorage.DeriveKey("", "0123456789abcdef"u8));
+        Assert.Throws<ArgumentException>(() => BlazeDbEncryptedStorage.DeriveKey("passphrase", "short"u8));
     }
 
     [Fact]
     public async Task Passphrase_Derived_Key_Decrypts_What_It_Encrypted()
     {
         var salt = RandomNumberGenerator.GetBytes(16);
-        var inner = new InMemoryStorage();
-        var key = EncryptedStorage.DeriveKey("hunter2-but-longer", salt, iterations: 1000);
+        var inner = new BlazeDbInMemoryStorage();
+        var key = BlazeDbEncryptedStorage.DeriveKey("hunter2-but-longer", salt, iterations: 1000);
 
-        using (var storage = new EncryptedStorage(inner, new AesGcmCipher(key), ownsCipher: true))
+        using (var storage = new BlazeDbEncryptedStorage(inner, new BlazeDbAesGcmCipher(key), ownsCipher: true))
         {
             await storage.WriteAtomicAsync("snapshot", "payload"u8.ToArray());
         }
 
-        var sameKey = EncryptedStorage.DeriveKey("hunter2-but-longer", salt, iterations: 1000);
-        using var reader = new EncryptedStorage(inner, new AesGcmCipher(sameKey), ownsCipher: true);
+        var sameKey = BlazeDbEncryptedStorage.DeriveKey("hunter2-but-longer", salt, iterations: 1000);
+        using var reader = new BlazeDbEncryptedStorage(inner, new BlazeDbAesGcmCipher(sameKey), ownsCipher: true);
         Assert.Equal("payload"u8.ToArray(), await reader.ReadAsync("snapshot"));
     }
 }

@@ -11,25 +11,25 @@ public sealed record Person(int Id, string Name, int Age);
 
 public static class PersonTable
 {
-    public static readonly TableDescriptor<int, Person> Descriptor = new(
+    public static readonly BlazeDbTableDescriptor<int, Person> Descriptor = new(
         "people",
         static p => p.Id,
         WriteRow,
         ReadRow,
         static (w, k) => w.WriteVarInt(k),
-        static (ref BufferReader r) => (int)r.ReadVarInt());
+        static (ref BlazeDbBufferReader r) => (int)r.ReadVarInt());
 
-    private static void WriteRow(BufferWriter writer, Person row)
+    private static void WriteRow(BlazeDbBufferWriter writer, Person row)
     {
-        writer.WriteTag(1, WireType.VarInt);
+        writer.WriteTag(1, BlazeDbWireType.VarInt);
         writer.WriteVarInt(row.Id);
-        writer.WriteTag(2, WireType.LengthDelimited);
+        writer.WriteTag(2, BlazeDbWireType.LengthDelimited);
         writer.WriteString(row.Name);
-        writer.WriteTag(3, WireType.VarInt);
+        writer.WriteTag(3, BlazeDbWireType.VarInt);
         writer.WriteVarInt(row.Age);
     }
 
-    private static Person ReadRow(ref BufferReader reader)
+    private static Person ReadRow(ref BlazeDbBufferReader reader)
     {
         var id = 0;
         var name = "";
@@ -59,6 +59,6 @@ public static class PersonTable
 
 public static class TestDb
 {
-    public static async Task<Database> OpenInMemoryAsync() =>
-        await Database.OpenAsync(new DatabaseOptions().AddTable(PersonTable.Descriptor));
+    public static async Task<BlazeDbDatabase> OpenInMemoryAsync() =>
+        await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions().AddTable(PersonTable.Descriptor));
 }

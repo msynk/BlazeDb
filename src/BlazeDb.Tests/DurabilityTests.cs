@@ -8,8 +8,8 @@ public class DurabilityTests
 {
     private static readonly TimeSpan Never = TimeSpan.FromHours(1);
 
-    private static Task<Database> OpenAsync(IStorage storage, TimeSpan? flushInterval = null) =>
-        Database.OpenAsync(new DatabaseOptions
+    private static Task<BlazeDbDatabase> OpenAsync(IBlazeDbStorage storage, TimeSpan? flushInterval = null) =>
+        BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = flushInterval ?? Never,
@@ -18,7 +18,7 @@ public class DurabilityTests
     [Fact]
     public async Task Flushed_Data_Survives_Reopen_After_Clean_Dispose()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
 
         await using (var db = await OpenAsync(storage))
         {
@@ -41,7 +41,7 @@ public class DurabilityTests
     [Fact]
     public async Task Flushed_Data_Survives_Crash_Without_Dispose()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
 
         var db = await OpenAsync(storage);
         db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "Ada", 36));
@@ -55,7 +55,7 @@ public class DurabilityTests
     [Fact]
     public async Task Unflushed_Data_Is_Lost_On_Crash_But_Flushed_Data_Survives()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
 
         var db = await OpenAsync(storage);
         var people = db.GetTable(PersonTable.Descriptor);
@@ -73,7 +73,7 @@ public class DurabilityTests
     [Fact]
     public async Task Background_Flusher_Persists_Without_Explicit_Flush()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
 
         var db = await OpenAsync(storage, flushInterval: TimeSpan.FromMilliseconds(20));
         db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "Ada", 36));
@@ -141,9 +141,9 @@ public class DurabilityTests
     }
 
     /// <summary>An in-memory backend whose appends can be made to fail on demand.</summary>
-    private sealed class FlakyStorage : IStorage
+    private sealed class FlakyStorage : IBlazeDbStorage
     {
-        private readonly InMemoryStorage _inner = new();
+        private readonly BlazeDbInMemoryStorage _inner = new();
 
         public bool FailAppends { get; set; }
 
@@ -165,7 +165,7 @@ public class DurabilityTests
     [Fact]
     public async Task Torn_Tail_Is_Discarded_And_Wal_Keeps_Working()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
 
         await using (var db = await OpenAsync(storage))
         {
@@ -193,7 +193,7 @@ public class DurabilityTests
     [Fact]
     public async Task Corrupted_Record_Payload_Stops_Replay_At_Last_Valid_Record()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
 
         await using (var db = await OpenAsync(storage))
         {
@@ -216,7 +216,7 @@ public class DurabilityTests
     [Fact]
     public async Task Checkpoint_Compacts_Wal_Into_Snapshot_And_Recovers()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
 
         await using (var db = await OpenAsync(storage))
         {
@@ -246,9 +246,9 @@ public class DurabilityTests
     [Fact]
     public async Task Automatic_Checkpoint_Triggers_When_Wal_Grows()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
 
-        var db = await Database.OpenAsync(new DatabaseOptions
+        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             Storage = storage,
             FlushInterval = TimeSpan.FromMilliseconds(20),
@@ -277,7 +277,7 @@ public class DurabilityTests
     [Fact]
     public async Task Committed_Transaction_Is_Atomic_Across_Recovery()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
 
         await using (var db = await OpenAsync(storage))
         {
@@ -295,7 +295,7 @@ public class DurabilityTests
     [Fact]
     public async Task RolledBack_Transaction_Leaves_No_Trace_After_Recovery()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
 
         await using (var db = await OpenAsync(storage))
         {
@@ -318,7 +318,7 @@ public class DurabilityTests
     [Fact]
     public async Task Corrupt_Manifest_Throws_CorruptDatabaseException()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using (var db = await OpenAsync(storage))
         {
             db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "Ada", 36));
@@ -328,13 +328,13 @@ public class DurabilityTests
         manifest[^1] ^= 0xFF;
         storage.SetFile("manifest.blz", manifest);
 
-        await Assert.ThrowsAsync<CorruptDatabaseException>(async () => await OpenAsync(storage));
+        await Assert.ThrowsAsync<BlazeDbCorruptDatabaseException>(async () => await OpenAsync(storage));
     }
 
     [Fact]
     public async Task Corrupt_Snapshot_Throws_CorruptDatabaseException()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using (var db = await OpenAsync(storage))
         {
             db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "Ada", 36));
@@ -345,13 +345,13 @@ public class DurabilityTests
         snapshot[^1] ^= 0xFF;
         storage.SetFile("snapshot-2.blz", snapshot);
 
-        await Assert.ThrowsAsync<CorruptDatabaseException>(async () => await OpenAsync(storage));
+        await Assert.ThrowsAsync<BlazeDbCorruptDatabaseException>(async () => await OpenAsync(storage));
     }
 
     [Fact]
     public async Task Checkpoint_Inside_Transaction_Is_Rejected()
     {
-        var storage = new InMemoryStorage();
+        var storage = new BlazeDbInMemoryStorage();
         await using var db = await OpenAsync(storage);
 
         using var txn = db.BeginTransaction();
@@ -366,7 +366,7 @@ public class DurabilityTests
         var directory = Path.Combine(Path.GetTempPath(), "blazedb-test-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var storage = new FileStorage(directory);
+            var storage = new BlazeDbFileStorage(directory);
             await using (var db = await OpenAsync(storage))
             {
                 var people = db.GetTable(PersonTable.Descriptor);
@@ -378,7 +378,7 @@ public class DurabilityTests
                 people.Insert(new Person(21, "After", 21));
             }
 
-            await using var reopened = await OpenAsync(new FileStorage(directory));
+            await using var reopened = await OpenAsync(new BlazeDbFileStorage(directory));
             var recovered = reopened.GetTable(PersonTable.Descriptor);
             Assert.Equal(21, recovered.Count);
             Assert.Equal(new Person(21, "After", 21), recovered.Get(21));
@@ -392,12 +392,12 @@ public class DurabilityTests
     [Fact]
     public async Task Generated_Model_Persists_Through_Wal_And_Snapshot()
     {
-        var storage = new InMemoryStorage();
-        var options = () => new DatabaseOptions { Storage = storage, FlushInterval = Never }
+        var storage = new BlazeDbInMemoryStorage();
+        var options = () => new BlazeDbDatabaseOptions { Storage = storage, FlushInterval = Never }
             .AddTable(TodoItem.Table);
 
         var id = Guid.NewGuid();
-        await using (var db = await Database.OpenAsync(options()))
+        await using (var db = await BlazeDbDatabase.OpenAsync(options()))
         {
             var todos = db.GetTable(TodoItem.Table);
             todos.Insert(new TodoItem
@@ -413,7 +413,7 @@ public class DurabilityTests
             await db.CheckpointAsync();
         }
 
-        await using (var reopened = await Database.OpenAsync(options()))
+        await using (var reopened = await BlazeDbDatabase.OpenAsync(options()))
         {
             var todo = reopened.GetTable(TodoItem.Table).Get(id);
             Assert.NotNull(todo);

@@ -361,8 +361,8 @@ else
 
     private enum SortMode { Newest, Oldest, Effort, Title }
 
-    private Database? _db;
-    private Table<Guid, TodoEntry>? _todos;
+    private BlazeDbDatabase? _db;
+    private BlazeDbTable<Guid, TodoEntry>? _todos;
     private string? _error;
 
     // filters
@@ -444,10 +444,10 @@ else
         _doneCount = _todos.CountBy(TodoEntry.Indexes.Done, true);
         _uncategorized = _todos.Count - DemoData.Categories.Sum(c => _todos.CountBy(TodoEntry.Indexes.Category, c));
 
-        var lines = new List<string> { "Query<Guid, TodoEntry>.From(todos)" };
+        var lines = new List<string> { "BlazeDbQuery<Guid, TodoEntry>.From(todos)" };
 
         // 1. Source - the most selective index available wins.
-        var query = Query<Guid, TodoEntry>.From(_todos);
+        var query = BlazeDbQuery<Guid, TodoEntry>.From(_todos);
         var statusHandled = false;
         var categoryHandled = false;
         var priorityHandled = false;
@@ -480,19 +480,19 @@ else
             var descending = _sort == SortMode.Newest;
             query = query.UseIndex(
                 TodoEntry.Indexes.CreatedAt,
-                Bound<DateTime>.Unbounded,
-                Bound<DateTime>.Unbounded,
+                BlazeDbBound<DateTime>.Unbounded,
+                BlazeDbBound<DateTime>.Unbounded,
                 descending);
             lines.Add("    .UseIndex(TodoEntry.Indexes.CreatedAt,");
-            lines.Add($"              Bound<DateTime>.Unbounded, Bound<DateTime>.Unbounded, descending: {descending.ToString().ToLowerInvariant()})");
+            lines.Add($"              BlazeDbBound<DateTime>.Unbounded, BlazeDbBound<DateTime>.Unbounded, descending: {descending.ToString().ToLowerInvariant()})");
             _sourceLabel = "ordered index - CreatedAt";
             orderedSource = true;
         }
         else if (_sort == SortMode.Effort)
         {
-            query = query.UseIndex(TodoEntry.Indexes.Effort, Bound<int>.Unbounded, Bound<int>.Unbounded, descending: true);
+            query = query.UseIndex(TodoEntry.Indexes.Effort, BlazeDbBound<int>.Unbounded, BlazeDbBound<int>.Unbounded, descending: true);
             lines.Add("    .UseIndex(TodoEntry.Indexes.Effort,");
-            lines.Add("              Bound<int>.Unbounded, Bound<int>.Unbounded, descending: true)");
+            lines.Add("              BlazeDbBound<int>.Unbounded, BlazeDbBound<int>.Unbounded, descending: true)");
             _sourceLabel = "ordered index - Effort";
             orderedSource = true;
         }
@@ -633,9 +633,9 @@ else
             _page = 0;
             Refresh();
         }
-        catch (DuplicateKeyException ex)
+        catch (BlazeDbDuplicateKeyException ex)
         {
-            _addError = $"DuplicateKeyException on key {ex.Key}";
+            _addError = $"BlazeDbDuplicateKeyException on key {ex.Key}";
         }
     }
 

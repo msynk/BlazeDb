@@ -15,9 +15,9 @@ public class SerializationTests
     [InlineData(-300L)]
     public void VarInt_Roundtrips(long value)
     {
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         writer.WriteVarInt(value);
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         Assert.Equal(value, reader.ReadVarInt());
         Assert.Equal(0, reader.Remaining);
     }
@@ -29,9 +29,9 @@ public class SerializationTests
     [InlineData(ulong.MaxValue)]
     public void VarUInt_Roundtrips(ulong value)
     {
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         writer.WriteVarUInt(value);
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         Assert.Equal(value, reader.ReadVarUInt());
     }
 
@@ -44,7 +44,7 @@ public class SerializationTests
         var dto = DateTimeOffset.Now;
         var ts = TimeSpan.FromMilliseconds(123456.789);
 
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         writer.WriteBool(true);
         writer.WriteSingle(3.14f);
         writer.WriteDouble(Math.E);
@@ -57,7 +57,7 @@ public class SerializationTests
         writer.WriteDateTimeOffset(dto);
         writer.WriteTimeSpan(ts);
 
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         Assert.True(reader.ReadBool());
         Assert.Equal(3.14f, reader.ReadSingle());
         Assert.Equal(Math.E, reader.ReadDouble());
@@ -76,19 +76,19 @@ public class SerializationTests
     [Fact]
     public void Unknown_Fields_Can_Be_Skipped()
     {
-        var writer = new BufferWriter();
-        writer.WriteTag(1, WireType.VarInt);
+        var writer = new BlazeDbBufferWriter();
+        writer.WriteTag(1, BlazeDbWireType.VarInt);
         writer.WriteVarInt(42);
-        writer.WriteTag(99, WireType.LengthDelimited);
+        writer.WriteTag(99, BlazeDbWireType.LengthDelimited);
         writer.WriteString("future field");
-        writer.WriteTag(100, WireType.Fixed64);
+        writer.WriteTag(100, BlazeDbWireType.Fixed64);
         writer.WriteFixed64(123);
-        writer.WriteTag(101, WireType.Fixed32);
+        writer.WriteTag(101, BlazeDbWireType.Fixed32);
         writer.WriteFixed32(7);
-        writer.WriteTag(2, WireType.VarInt);
+        writer.WriteTag(2, BlazeDbWireType.VarInt);
         writer.WriteVarInt(-7);
 
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         long? first = null;
         long? second = null;
         while (reader.Remaining > 0)
@@ -116,10 +116,10 @@ public class SerializationTests
     public void Row_Serialization_Roundtrips_Through_Descriptor()
     {
         var person = new Person(7, "Ada", 36);
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         PersonTable.Descriptor.RowWriter(writer, person);
 
-        var reader = new BufferReader(writer.WrittenSpan);
+        var reader = new BlazeDbBufferReader(writer.WrittenSpan);
         var decoded = PersonTable.Descriptor.RowReader(ref reader);
 
         Assert.Equal(person, decoded);
@@ -128,14 +128,14 @@ public class SerializationTests
     [Fact]
     public void Truncated_Buffer_Throws_InvalidData()
     {
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         writer.WriteString("hello");
         var bytes = writer.ToArray().AsSpan(0, 3);
 
         var thrown = false;
         try
         {
-            var reader = new BufferReader(bytes);
+            var reader = new BlazeDbBufferReader(bytes);
             reader.ReadString();
         }
         catch (InvalidDataException)
@@ -151,23 +151,23 @@ public class SerializationTests
         // A Guid, decimal or DateTimeOffset is a 16-byte length-delimited block. A block of any
         // other size is corruption and must surface as the decode error every other path throws,
         // not as an argument error out of the value's constructor.
-        var writer = new BufferWriter();
+        var writer = new BlazeDbBufferWriter();
         writer.WriteBytes(new byte[7]);
         var bytes = writer.ToArray();
 
         Assert.Throws<InvalidDataException>(() =>
         {
-            var reader = new BufferReader(bytes);
+            var reader = new BlazeDbBufferReader(bytes);
             reader.ReadGuid();
         });
         Assert.Throws<InvalidDataException>(() =>
         {
-            var reader = new BufferReader(bytes);
+            var reader = new BlazeDbBufferReader(bytes);
             reader.ReadDecimal();
         });
         Assert.Throws<InvalidDataException>(() =>
         {
-            var reader = new BufferReader(bytes);
+            var reader = new BlazeDbBufferReader(bytes);
             reader.ReadDateTimeOffset();
         });
     }

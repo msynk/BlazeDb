@@ -6,7 +6,7 @@ namespace BlazeDb.EntityFrameworkCore.Infrastructure;
 /// <summary>
 /// Carries the engine instance the context runs against. BlazeDb databases are opened and owned by
 /// the application - one per origin, holding the writer lock - so the provider is handed a live
-/// <see cref="Database"/> rather than a connection string it would open itself.
+/// <see cref="BlazeDbDatabase"/> rather than a connection string it would open itself.
 /// </summary>
 public sealed class BlazeDbOptionsExtension : IDbContextOptionsExtension
 {
@@ -18,11 +18,11 @@ public sealed class BlazeDbOptionsExtension : IDbContextOptionsExtension
 
     private BlazeDbOptionsExtension(BlazeDbOptionsExtension copyFrom) => Database = copyFrom.Database;
 
-    public Database? Database { get; private set; }
+    public BlazeDbDatabase? Database { get; private set; }
 
     public DbContextOptionsExtensionInfo Info => _info ??= new ExtensionInfo(this);
 
-    public BlazeDbOptionsExtension WithDatabase(Database database)
+    public BlazeDbOptionsExtension WithDatabase(BlazeDbDatabase database)
     {
         var clone = new BlazeDbOptionsExtension(this) { Database = database };
         return clone;
@@ -36,7 +36,7 @@ public sealed class BlazeDbOptionsExtension : IDbContextOptionsExtension
         {
             throw new InvalidOperationException(
                 "No BlazeDb database was configured. Call optionsBuilder.UseBlazeDb(database) with " +
-                "an open BlazeDb.Database instance.");
+                "an open BlazeDb.BlazeDbDatabase instance.");
         }
     }
 

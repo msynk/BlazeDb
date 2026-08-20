@@ -6,9 +6,9 @@ namespace BlazeDb.Tests;
 
 public class StreamingQueryTests
 {
-    private static async Task<(Database Db, Table<Guid, TodoItem> Todos)> OpenAsync(int rows)
+    private static async Task<(BlazeDbDatabase Db, BlazeDbTable<Guid, TodoItem> Todos)> OpenAsync(int rows)
     {
-        var db = await Database.OpenAsync(new DatabaseOptions
+        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
         {
             FlushInterval = TimeSpan.FromHours(1),
         }.AddTable(TodoItem.Table));
@@ -33,7 +33,7 @@ public class StreamingQueryTests
         await using var owned = db;
 
         var seen = 0;
-        await foreach (var _ in Query<Guid, TodoItem>.From(todos).ExecuteAsync(batchSize: 64))
+        await foreach (var _ in BlazeDbQuery<Guid, TodoItem>.From(todos).ExecuteAsync(batchSize: 64))
         {
             seen++;
         }
@@ -47,7 +47,7 @@ public class StreamingQueryTests
         var (db, todos) = await OpenAsync(100);
         await using var owned = db;
 
-        var titles = await Query<Guid, TodoItem>.From(todos)
+        var titles = await BlazeDbQuery<Guid, TodoItem>.From(todos)
             .Where(t => t.Done)
             .OrderBy(t => t.CreatedAt)
             .Skip(2)
@@ -64,7 +64,7 @@ public class StreamingQueryTests
         await using var owned = db;
 
         var titles = new List<string>();
-        await foreach (var title in Query<Guid, TodoItem>.From(todos)
+        await foreach (var title in BlazeDbQuery<Guid, TodoItem>.From(todos)
                            .Where(t => !t.Done)
                            .ExecuteAsync(t => t.Title, batchSize: 2))
         {
@@ -87,7 +87,7 @@ public class StreamingQueryTests
         var enumeration = Task.Run(async () =>
         {
             var index = 0;
-            await foreach (var row in Query<Guid, TodoItem>.From(todos).ExecuteAsync(batchSize: 1))
+            await foreach (var row in BlazeDbQuery<Guid, TodoItem>.From(todos).ExecuteAsync(batchSize: 1))
             {
                 if (index++ == 10)
                 {
@@ -112,7 +112,7 @@ public class StreamingQueryTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
-            await foreach (var _ in Query<Guid, TodoItem>.From(todos).ExecuteAsync(batchSize: 8, cts.Token))
+            await foreach (var _ in BlazeDbQuery<Guid, TodoItem>.From(todos).ExecuteAsync(batchSize: 8, cts.Token))
             {
                 if (++seen == 20)
                 {
@@ -132,7 +132,7 @@ public class StreamingQueryTests
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
         {
-            await foreach (var _ in Query<Guid, TodoItem>.From(todos).ExecuteAsync(batchSize: 0))
+            await foreach (var _ in BlazeDbQuery<Guid, TodoItem>.From(todos).ExecuteAsync(batchSize: 0))
             {
             }
         });
