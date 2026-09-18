@@ -118,6 +118,101 @@ public class DbContextApiTests
         Assert.Equal("wal", context.Tags.Find("wal")!.Slug);
     }
 
+    [Fact]
+    public void AddDbContextFactory_Creates_Contexts_Over_The_Same_Store()
+    {
+        var name = "factory-" + Guid.NewGuid().ToString("N");
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<PeopleContext>(options => options.UseBlazeDb(name));
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IDbContextFactory<PeopleContext>>();
+
+        using (var context = factory.CreateDbContext())
+        {
+            context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
+            context.SaveChanges();
+        }
+
+        using var next = factory.CreateDbContext();
+        Assert.Equal("Ada", next.People.Single().Name);
+    }
+
+    [Fact]
+    public void Parameterless_UseBlazeDb_Shares_The_Context_Type_Store()
+    {
+        var options = new DbContextOptionsBuilder<DefaultStoreContext>().UseBlazeDb().Options;
+
+        using (var context = new DefaultStoreContext(options))
+        {
+            context.Database.EnsureDeleted();
+            context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
+            context.SaveChanges();
+        }
+
+        using var next = new DefaultStoreContext(options);
+        Assert.Equal("Ada", next.People.Single().Name);
+        next.Database.EnsureDeleted();
+    }
+
+    [Fact]
+    public void Storage_Instance_Is_The_Store_Identity()
+    {
+        var storage = new BlazeDb.Storage.BlazeDbInMemoryStorage();
+        var options = new DbContextOptionsBuilder<PeopleContext>().UseBlazeDb(storage).Options;
+
+        using (var context = new PeopleContext(options))
+        {
+            context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
+            context.SaveChanges();
+        }
+
+        using var next = new PeopleContext(options);
+        Assert.Equal("Ada", next.People.Single().Name);
+        next.Database.EnsureDeleted();
+    }
+
+    [Fact]
+    public void EnsureDeleted_Clears_The_Store_For_Later_Contexts()
+    {
+        var options = IsolatedOptions();
+
+        using (var context = new PeopleContext(options))
+        {
+            context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
+            context.SaveChanges();
+            Assert.True(context.Database.EnsureDeleted());
+        }
+
+        using var fresh = new PeopleContext(options);
+        Assert.Empty(fresh.People);
+        Assert.True(fresh.Database.CanConnect());
+    }
+
+    [Fact]
+    public void GetBlazeDb_Returns_The_Engine_The_Context_Is_Using()
+    {
+        using var context = new PeopleContext(IsolatedOptions());
+        context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
+        context.SaveChanges();
+
+        var engine = context.Database.GetBlazeDb();
+        Assert.Equal("Ada", engine.GetTable(Person.Table).Get(1)!.Name);
+    }
+
+    [Fact]
+    public async Task An_Existing_Engine_Can_Be_Passed_In()
+    {
+        await using var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions());
+        using var context = new PeopleContext(
+            new DbContextOptionsBuilder<PeopleContext>().UseBlazeDb(db).Options);
+
+        context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
+        context.SaveChanges();
+
+        Assert.Equal("Ada", db.GetTable(Person.Table).Get(1)!.Name);
+        Assert.False(context.Database.EnsureDeleted());
+    }
+
     private sealed class OnConfiguringContext : DbContext
     {
         private readonly string _name;
@@ -128,5 +223,14 @@ public class DbContextApiTests
 
         protected override void OnConfiguring(DbContextOptionsBuilder options) =>
             options.UseBlazeDb(_name);
+    }
+
+    private sealed class DefaultStoreContext : DbContext
+    {
+        public DefaultStoreContext(DbContextOptions<DefaultStoreContext> options) : base(options)
+        {
+        }
+
+        public DbSet<Person> People => Set<Person>();
     }
 }

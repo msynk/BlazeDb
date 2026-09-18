@@ -9,4 +9,7 @@ internal interface IBlazeDbTableCache
     BlazeDbDatabase Database { get; }
 
     IBlazeDbTableBinding GetBinding(IEntityType entityType);
+
+    /// <summary>Drops the cached engine so the next access reopens after <c>EnsureDeleted</c>.</summary>
+    void Reset();
 }

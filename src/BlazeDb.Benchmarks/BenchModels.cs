@@ -1,4 +1,5 @@
 using BlazeDb;
+using Microsoft.EntityFrameworkCore;
 
 namespace BlazeDb.Benchmarks;
 
@@ -15,4 +16,13 @@ public partial class BenchPerson
 
     [BlazeDbOrderedIndex]
     public int Age { get; set; }
+}
+
+public sealed class BenchContext : DbContext
+{
+    public BenchContext(DbContextOptions<BenchContext> options) : base(options)
+    {
+    }
+
+    public DbSet<BenchPerson> People => Set<BenchPerson>();
 }

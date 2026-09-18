@@ -47,11 +47,7 @@ internal sealed class BlazeDbDatabaseCreator : IDatabaseCreator
             ? Task.FromCanceled<bool>(cancellationToken)
             : Task.FromResult(CanConnect());
 
-    public bool EnsureDeleted()
-    {
-        EnsureDeletedAsync().GetAwaiter().GetResult();
-        return true;
-    }
+    public bool EnsureDeleted() => EnsureDeletedAsync().GetAwaiter().GetResult();
 
     public async Task<bool> EnsureDeletedAsync(CancellationToken cancellationToken = default)
     {
@@ -63,6 +59,7 @@ internal sealed class BlazeDbDatabaseCreator : IDatabaseCreator
 
         var storage = extension.Storage;
         await _cache.ReleaseAsync(extension.StoreKey).ConfigureAwait(false);
+        _tables.Reset();
         if (storage is not null)
         {
             await WipeAsync(storage, cancellationToken).ConfigureAwait(false);

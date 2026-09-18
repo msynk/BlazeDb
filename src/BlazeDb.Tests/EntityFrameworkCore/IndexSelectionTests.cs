@@ -13,9 +13,9 @@ namespace BlazeDb.EntityFrameworkCore.Tests;
 /// </summary>
 public class IndexSelectionTests
 {
-    private static async Task<(TestDatabase Test, PeopleContext Context)> OpenAsync()
+    private static (TestDatabase Test, PeopleContext Context) Open()
     {
-        var test = await TestDatabase.OpenAsync();
+        var test = TestDatabase.Open();
         return (test, test.CreateContext());
     }
 
@@ -30,10 +30,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task Equality_On_An_Indexed_Property_Uses_Its_Index()
+    public void Equality_On_An_Indexed_Property_Uses_Its_Index()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var plan = PlanFor(test, context, context.People.Where(p => p.City == "London"));
@@ -42,10 +42,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task Equality_Written_Backwards_Still_Matches()
+    public void Equality_Written_Backwards_Still_Matches()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var plan = PlanFor(test, context, context.People.Where(p => "London" == p.City));
@@ -54,10 +54,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task A_Range_Uses_The_Ordered_Index()
+    public void A_Range_Uses_The_Ordered_Index()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var plan = PlanFor(test, context, context.People.Where(p => p.Age >= 40 && p.Age <= 50));
@@ -66,10 +66,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task Two_Equalities_Matching_A_Compound_Index_Use_It()
+    public void Two_Equalities_Matching_A_Compound_Index_Use_It()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var plan = PlanFor(test, context, context.People.Where(p => p.City == "London" && p.Age == 36));
@@ -78,10 +78,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task Ordering_By_An_Indexed_Property_Reads_The_Index_Instead_Of_Sorting()
+    public void Ordering_By_An_Indexed_Property_Reads_The_Index_Instead_Of_Sorting()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var plan = PlanFor(test, context, context.People.OrderBy(p => p.Age));
@@ -92,10 +92,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task An_Unindexed_Predicate_Falls_Back_To_A_Scan()
+    public void An_Unindexed_Predicate_Falls_Back_To_A_Scan()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var plan = PlanFor(test, context, context.People.Where(p => p.Name == "Ada"));
@@ -104,10 +104,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task Paging_Is_Carried_By_The_Plan()
+    public void Paging_Is_Carried_By_The_Plan()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var plan = PlanFor(test, context, context.People.Skip(2).Take(3));
@@ -117,10 +117,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task A_Where_After_Paging_Is_Left_To_Linq()
+    public void A_Where_After_Paging_Is_Left_To_Linq()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         // Filtering after a Take means something different from filtering before it, so the plan
@@ -132,10 +132,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task An_Index_Lookup_Returns_The_Same_Rows_As_A_Scan()
+    public void An_Index_Lookup_Returns_The_Same_Rows_As_A_Scan()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         for (var i = 1; i <= 50; i++)
@@ -158,10 +158,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task A_Strict_Range_Keeps_Its_Boundary_Filter()
+    public void A_Strict_Range_Keeps_Its_Boundary_Filter()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         for (var i = 1; i <= 10; i++)
@@ -176,10 +176,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task An_Ordered_Index_Scan_Comes_Back_Sorted()
+    public void An_Ordered_Index_Scan_Comes_Back_Sorted()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         foreach (var age in (int[])[40, 10, 30, 20])
@@ -192,10 +192,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task A_Compound_Lookup_Returns_Only_Exact_Tuple_Matches()
+    public void A_Compound_Lookup_Returns_Only_Exact_Tuple_Matches()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         test.People.Insert(new Person { Id = 1, Name = "a", City = "London", Age = 30, Email = "a@x.com" });
@@ -208,10 +208,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task A_Null_Valued_Equality_Does_Not_Use_An_Index()
+    public void A_Null_Valued_Equality_Does_Not_Use_An_Index()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         test.People.Insert(new Person { Id = 1, Name = "a", City = "X", Age = 1, Email = null });
@@ -247,10 +247,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task A_Computed_Value_Still_Drives_An_Index()
+    public void A_Computed_Value_Still_Drives_An_Index()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var (lo, hi) = (10, 30);
@@ -260,10 +260,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task Equality_On_The_Primary_Key_Reads_The_Key_Dictionary()
+    public void Equality_On_The_Primary_Key_Reads_The_Key_Dictionary()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         test.People.Insert(new Person { Id = 1, Name = "a", City = "X", Age = 1, Email = "a@x.com" });
@@ -286,10 +286,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task A_Key_Declared_With_The_Engine_Attribute_Is_The_Primary_Key()
+    public void A_Key_Declared_With_The_Engine_Attribute_Is_The_Primary_Key()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var tags = context.Model.FindEntityType(typeof(Tag))!;
@@ -303,10 +303,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task Predicate_Values_Are_Converted_To_The_Index_Key_Type()
+    public void Predicate_Values_Are_Converted_To_The_Index_Key_Type()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         test.Tags.Insert(new Tag { Slug = "ada", Kind = TagKind.Person, Weight = 9 });
@@ -337,10 +337,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task An_Ordering_On_The_Range_Member_Sets_The_Direction_Instead_Of_Sorting()
+    public void An_Ordering_On_The_Range_Member_Sets_The_Direction_Instead_Of_Sorting()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         foreach (var age in (int[])[40, 10, 30, 20])
@@ -360,12 +360,12 @@ public class IndexSelectionTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task A_Bool_Predicate_Uses_Its_Index_However_It_Is_Written(bool active)
+    public void A_Bool_Predicate_Uses_Its_Index_However_It_Is_Written(bool active)
     {
         // "Where(p => !p.Active)" is how a bool filter is actually written, and it means the same
         // as "== false"; the everyday spelling must not be the one that falls back to a scan.
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         for (var id = 1; id <= 4; id++)
@@ -386,10 +386,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task A_Negated_Non_Member_Is_Left_As_A_Filter()
+    public void A_Negated_Non_Member_Is_Left_As_A_Filter()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var plan = PlanFor(test, context, context.People.Where(p => !(p.Age > 5 && p.Active)));
@@ -398,10 +398,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task A_Where_After_An_OrderBy_Is_Still_Absorbed()
+    public void A_Where_After_An_OrderBy_Is_Still_Absorbed()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         var translated = TranslateFor(test, context, context.People.OrderBy(p => p.Name).Where(p => p.City == "London").Take(3));
@@ -412,10 +412,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task A_Membership_Test_On_The_Key_Or_An_Index_Becomes_A_Batch_Of_Lookups()
+    public void A_Membership_Test_On_The_Key_Or_An_Index_Becomes_A_Batch_Of_Lookups()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         for (var i = 1; i <= 6; i++)
@@ -458,10 +458,10 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public async Task Repeated_Paging_Operators_Compose_Correctly()
+    public void Repeated_Paging_Operators_Compose_Correctly()
     {
-        var (test, context) = await OpenAsync();
-        await using var owned = test;
+        var (test, context) = Open();
+        using var owned = test;
         using var session = context;
 
         for (var i = 1; i <= 10; i++)

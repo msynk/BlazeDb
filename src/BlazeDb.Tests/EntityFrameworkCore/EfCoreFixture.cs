@@ -6,7 +6,7 @@ namespace BlazeDb.EntityFrameworkCore.Tests;
 /// A private in-memory store and contexts over it. Tables come from <see cref="PeopleContext"/>'s
 /// model; nothing is registered with <c>AddTable</c>.
 /// </summary>
-internal sealed class TestDatabase : IAsyncDisposable
+internal sealed class TestDatabase : IDisposable, IAsyncDisposable
 {
     private TestDatabase(DbContextOptions<PeopleContext> options, BlazeDbDatabase database)
     {
@@ -27,8 +27,6 @@ internal sealed class TestDatabase : IAsyncDisposable
         return new TestDatabase(options, context.Database.GetBlazeDb());
     }
 
-    public static Task<TestDatabase> OpenAsync() => Task.FromResult(Open());
-
     public PeopleContext CreateContext() => new(Options);
 
     public BlazeDbTable<int, Person> People => Database.GetTable(Person.Table);
@@ -36,6 +34,12 @@ internal sealed class TestDatabase : IAsyncDisposable
     public BlazeDbTable<int, Order> Orders => Database.GetTable(Order.Table);
 
     public BlazeDbTable<string, Tag> Tags => Database.GetTable(Tag.Table);
+
+    public void Dispose()
+    {
+        using var context = CreateContext();
+        context.Database.EnsureDeleted();
+    }
 
     public async ValueTask DisposeAsync()
     {

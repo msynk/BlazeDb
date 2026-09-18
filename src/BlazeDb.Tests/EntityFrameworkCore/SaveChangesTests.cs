@@ -8,9 +8,9 @@ namespace BlazeDb.EntityFrameworkCore.Tests;
 public class SaveChangesTests
 {
     [Fact]
-    public async Task Adding_An_Entity_Puts_A_Row_In_The_Table()
+    public void Adding_An_Entity_Puts_A_Row_In_The_Table()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         using var context = test.CreateContext();
 
         context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
@@ -21,9 +21,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task A_Saved_Entity_Becomes_Unchanged()
+    public void A_Saved_Entity_Becomes_Unchanged()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         using var context = test.CreateContext();
 
         var person = new Person { Id = 1, Name = "Ada", City = "London", Age = 36 };
@@ -34,11 +34,11 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task A_Save_Inside_An_Engine_Transaction_Joins_It()
+    public void A_Save_Inside_An_Engine_Transaction_Joins_It()
     {
         // The engine's transactions are ambient, so a save made inside one belongs to it rather
         // than failing as a nested transaction - which is what mixing the two APIs would hit.
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         using var context = test.CreateContext();
 
         using (var transaction = test.Database.BeginTransaction())
@@ -54,9 +54,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task Rolling_Back_The_Engine_Transaction_Undoes_The_Save_Inside_It()
+    public void Rolling_Back_The_Engine_Transaction_Undoes_The_Save_Inside_It()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         using var context = test.CreateContext();
 
         using (var transaction = test.Database.BeginTransaction())
@@ -72,9 +72,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task A_Tracked_Entity_Is_The_Row_The_Table_Holds()
+    public void A_Tracked_Entity_Is_The_Row_The_Table_Holds()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         test.People.Insert(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
 
         using var context = test.CreateContext();
@@ -84,9 +84,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task Mutating_A_Tracked_Entity_Changes_Memory_Before_SaveChanges()
+    public void Mutating_A_Tracked_Entity_Changes_Memory_Before_SaveChanges()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         test.People.Insert(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
 
         using var context = test.CreateContext();
@@ -102,9 +102,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task Saving_A_Modified_Entity_Moves_Its_Index_Entries()
+    public void Saving_A_Modified_Entity_Moves_Its_Index_Entries()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         test.People.Insert(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
 
         using var context = test.CreateContext();
@@ -118,9 +118,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task Deleting_An_Entity_Removes_The_Row_And_Its_Index_Entries()
+    public void Deleting_An_Entity_Removes_The_Row_And_Its_Index_Entries()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         test.People.Insert(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
 
         using var context = test.CreateContext();
@@ -132,9 +132,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task A_Deleted_Entity_Stops_Being_Tracked()
+    public void A_Deleted_Entity_Stops_Being_Tracked()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         test.People.Insert(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
 
         using var context = test.CreateContext();
@@ -146,9 +146,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task Mutating_And_Deleting_In_One_Save_Still_Clears_The_Old_Index_Entry()
+    public void Mutating_And_Deleting_In_One_Save_Still_Clears_The_Old_Index_Entry()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         test.People.Insert(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
 
         using var context = test.CreateContext();
@@ -163,9 +163,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task A_Save_Spanning_Two_Tables_Is_One_Transaction()
+    public void A_Save_Spanning_Two_Tables_Is_One_Transaction()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         using var context = test.CreateContext();
 
         context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
@@ -177,9 +177,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task A_Failing_Save_Leaves_Every_Table_Untouched()
+    public void A_Failing_Save_Leaves_Every_Table_Untouched()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         test.People.Insert(new Person { Id = 1, Name = "Ada", City = "London", Age = 36, Email = "ada@example.com" });
 
         using var context = test.CreateContext();
@@ -194,9 +194,9 @@ public class SaveChangesTests
     }
 
     [Fact]
-    public async Task Saving_Nothing_Costs_Nothing()
+    public void Saving_Nothing_Costs_Nothing()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         using var context = test.CreateContext();
 
         Assert.Equal(0, context.SaveChanges());
@@ -205,7 +205,7 @@ public class SaveChangesTests
     [Fact]
     public async Task SaveChangesAsync_Applies_The_Same_Changes()
     {
-        await using var test = await TestDatabase.OpenAsync();
+        using var test = TestDatabase.Open();
         await using var context = test.CreateContext();
 
         context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
