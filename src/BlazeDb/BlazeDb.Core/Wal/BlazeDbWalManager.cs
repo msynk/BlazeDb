@@ -35,6 +35,11 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
 
     // Serializes all storage I/O (flushes vs checkpoints).
     private readonly SemaphoreSlim _ioLock = new(1, 1);
+
+    // Serializes a whole flush attempt - the quota headroom check and the append it guards - so the
+    // background loop and an explicit FlushAsync cannot interleave over the quota bookkeeping
+    // below, which _ioLock cannot cover because the compaction it may trigger needs that lock.
+    private readonly SemaphoreSlim _flushGate = new(1, 1);
     private readonly CancellationTokenSource _cts = new();
     private Task _loop = Task.CompletedTask;
     private volatile Exception? _fault;
@@ -121,9 +126,21 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
 
     public async ValueTask FlushAsync(CancellationToken ct = default)
     {
-        await EnsureQuotaHeadroomAsync(ct).ConfigureAwait(false);
-        await FlushPendingAsync(ct).ConfigureAwait(false);
-        _fault = null;
+        await _flushGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await EnsureQuotaHeadroomAsync(ct).ConfigureAwait(false);
+            // Cleared only when something actually reached storage, as in the loop: a flush with
+            // nothing buffered proves nothing and must not hide a checkpoint that keeps failing.
+            if (await FlushPendingAsync(ct).ConfigureAwait(false))
+            {
+                _fault = null;
+            }
+        }
+        finally
+        {
+            _flushGate.Release();
+        }
     }
 
     /// <summary>
@@ -262,17 +279,10 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
                 // Only the wait is cancellable. Once a flush has started it runs to completion:
                 // interrupting an append mid-write and re-issuing it later could leave a torn
                 // record in front of the retry, and replay stops at the first torn record.
-                await EnsureQuotaHeadroomAsync(CancellationToken.None).ConfigureAwait(false);
-                // A standing error clears only when something actually succeeded - a tick with
-                // nothing to write proves nothing and must not hide a checkpoint that keeps failing.
-                if (await FlushPendingAsync(CancellationToken.None).ConfigureAwait(false))
-                {
-                    _fault = null;
-                }
+                await FlushAsync(CancellationToken.None).ConfigureAwait(false);
                 if (Volatile.Read(ref _walSize) > _options.CheckpointWalSize)
                 {
                     await CheckpointCoreAsync(CancellationToken.None).ConfigureAwait(false);
-                    _fault = null;
                 }
             }
             catch (OperationCanceledException) when (_cts.IsCancellationRequested)
@@ -425,6 +435,10 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
                 throw new BlazeDbException(
                     $"Checkpoint {newGeneration} is durable, but the OnCheckpoint callback failed.", ex);
             }
+            // A completed checkpoint means the log did reach storage, so a standing failure is
+            // over - whoever asked for the checkpoint. If durability starts lagging again, the
+            // flusher records it afresh on its next tick.
+            _fault = null;
             return true;
         }
         finally
@@ -664,5 +678,6 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
         }
         _cts.Dispose();
         _ioLock.Dispose();
+        _flushGate.Dispose();
     }
 }

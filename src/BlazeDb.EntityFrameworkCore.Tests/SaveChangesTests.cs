@@ -32,6 +32,44 @@ public class SaveChangesTests
     }
 
     [Fact]
+    public async Task A_Save_Inside_An_Engine_Transaction_Joins_It()
+    {
+        // The engine's transactions are ambient, so a save made inside one belongs to it rather
+        // than failing as a nested transaction - which is what mixing the two APIs would hit.
+        await using var test = await TestDatabase.OpenAsync();
+        using var context = test.CreateContext();
+
+        using (var transaction = test.Database.BeginTransaction())
+        {
+            test.Orders.Insert(new Order { Id = 1, PersonId = 1, Total = 5m });
+            context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
+            Assert.Equal(1, context.SaveChanges());
+            transaction.Commit();
+        }
+
+        Assert.Equal("Ada", test.People.Get(1)!.Name);
+        Assert.Equal(1, test.Orders.Count);
+    }
+
+    [Fact]
+    public async Task Rolling_Back_The_Engine_Transaction_Undoes_The_Save_Inside_It()
+    {
+        await using var test = await TestDatabase.OpenAsync();
+        using var context = test.CreateContext();
+
+        using (var transaction = test.Database.BeginTransaction())
+        {
+            context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
+            context.SaveChanges();
+            Assert.Equal(1, test.People.Count);
+            transaction.Rollback();
+        }
+
+        Assert.Equal(0, test.People.Count);
+        Assert.Empty(test.People.Lookup(Person.Indexes.City, "London"));
+    }
+
+    [Fact]
     public async Task A_Tracked_Entity_Is_The_Row_The_Table_Holds()
     {
         await using var test = await TestDatabase.OpenAsync();

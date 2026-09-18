@@ -46,6 +46,14 @@ internal sealed class BlazeDbComparison
         {
             return TryReadMembership(call, parameter);
         }
+        if (conjunct is UnaryExpression { NodeType: ExpressionType.Not } negation)
+        {
+            return TryReadBooleanMember(negation.Operand, parameter, expected: false);
+        }
+        if (conjunct is MemberExpression)
+        {
+            return TryReadBooleanMember(conjunct, parameter, expected: true);
+        }
         if (conjunct is not BinaryExpression binary)
         {
             return null;
@@ -78,6 +86,19 @@ internal sealed class BlazeDbComparison
         }
         return BlazeDbKeyCoercion.TryCoerce(value, memberType, out var coerced) ? new BlazeDbComparison(member, op, coerced) : null;
     }
+
+    /// <summary>
+    /// <c>row.Flag</c> and <c>!row.Flag</c>, which is how a boolean predicate is actually written.
+    /// They say the same thing as <c>row.Flag == true</c> and <c>== false</c>, and an index over a
+    /// bool answers that in one probe - so the everyday spelling should not be the one that scans.
+    /// Only a plain <c>bool</c> qualifies: a <c>bool?</c> cannot be a condition on its own, and
+    /// <c>row.Flag.Value</c> is a member of a member, which is not a row member at all.
+    /// </summary>
+    private static BlazeDbComparison? TryReadBooleanMember(
+        Expression expression, ParameterExpression parameter, bool expected) =>
+        TryMember(expression, parameter, out var member, out var memberType) && memberType == typeof(bool)
+            ? new BlazeDbComparison(member, ExpressionType.Equal, expected)
+            : null;
 
     /// <summary>
     /// Reads <c>values.Contains(row.Member)</c> - the static <c>Enumerable.Contains</c> or an instance

@@ -148,6 +148,62 @@ public class EncryptionTests
     }
 
     [Fact]
+    public async Task An_Append_After_A_Torn_Frame_Cuts_The_Fragment_Off()
+    {
+        // Ignoring the fragment on the way out is not enough: it is still in the file, and an
+        // append landing behind it would be swallowed along with it on every later read.
+        var inner = new BlazeDbInMemoryStorage();
+        using var storage = Wrap(inner);
+        await storage.AppendAsync("wal", "committed"u8.ToArray());
+        var complete = (await inner.ReadAsync("wal"))!;
+        await storage.AppendAsync("wal", "interrupted"u8.ToArray());
+        var torn = (await inner.ReadAsync("wal"))!;
+        await inner.WriteAtomicAsync("wal", torn[..(complete.Length + 9)]);
+
+        Assert.Equal("committed", Encoding.UTF8.GetString((await storage.ReadAsync("wal"))!));
+
+        await storage.AppendAsync("wal", "later"u8.ToArray());
+
+        Assert.Equal("committedlater", Encoding.UTF8.GetString((await storage.ReadAsync("wal"))!));
+    }
+
+    [Fact]
+    public async Task Commits_After_A_Torn_Encrypted_Wal_Append_Still_Persist()
+    {
+        var inner = new BlazeDbInMemoryStorage();
+        var options = () => new BlazeDbDatabaseOptions
+        {
+            Storage = Wrap(inner),
+            FlushInterval = TimeSpan.FromHours(1),
+        }.AddTable(PersonTable.Descriptor);
+
+        var db = await BlazeDbDatabase.OpenAsync(options());
+        db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "one", 1));
+        await db.FlushAsync();
+        var whole = (await inner.ReadAsync("wal-1.blz"))!;
+
+        db.GetTable(PersonTable.Descriptor).Insert(new Person(2, "two", 2));
+        await db.FlushAsync();
+        var torn = (await inner.ReadAsync("wal-1.blz"))!;
+        await db.DisposeAsync();
+
+        // Crash midway through the frame the second flush was writing.
+        await inner.WriteAtomicAsync("wal-1.blz", torn[..(whole.Length + 9)]);
+
+        var reopened = await BlazeDbDatabase.OpenAsync(options());
+        Assert.Equal(1, reopened.GetTable(PersonTable.Descriptor).Count);
+
+        reopened.GetTable(PersonTable.Descriptor).Insert(new Person(3, "three", 3));
+        await reopened.FlushAsync();
+        await reopened.DisposeAsync();
+
+        var third = await BlazeDbDatabase.OpenAsync(options());
+        await using var owned = third;
+        Assert.Equal(2, third.GetTable(PersonTable.Descriptor).Count);
+        Assert.Equal("three", third.GetTable(PersonTable.Descriptor).Get(3)!.Name);
+    }
+
+    [Fact]
     public async Task A_Database_Round_Trips_Through_Encrypted_Storage()
     {
         var inner = new BlazeDbInMemoryStorage();

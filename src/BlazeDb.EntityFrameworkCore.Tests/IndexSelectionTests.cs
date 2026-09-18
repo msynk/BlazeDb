@@ -357,6 +357,46 @@ public class IndexSelectionTests
         Assert.Equal([40, 30, 20], query.Select(p => p.Age).ToList());
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_Bool_Predicate_Uses_Its_Index_However_It_Is_Written(bool active)
+    {
+        // "Where(p => !p.Active)" is how a bool filter is actually written, and it means the same
+        // as "== false"; the everyday spelling must not be the one that falls back to a scan.
+        var (test, context) = await OpenAsync();
+        await using var owned = test;
+        using var session = context;
+
+        for (var id = 1; id <= 4; id++)
+        {
+            test.People.Insert(new Person
+            {
+                Id = id, Name = $"P{id}", City = "X", Age = id, Email = $"p{id}@x.com", Active = id % 2 == 0,
+            });
+        }
+
+        var query = active ? context.People.Where(p => p.Active) : context.People.Where(p => !p.Active);
+        var translated = TranslateFor(test, context, query);
+
+        Assert.Equal("Active", translated.Plan.IndexName);
+        // The index answers the whole predicate, so nothing is left to re-test per row.
+        Assert.False(translated.Plan.HasOrdering);
+        Assert.Equal(active ? [2, 4] : [1, 3], query.Select(p => p.Id).Order().ToList());
+    }
+
+    [Fact]
+    public async Task A_Negated_Non_Member_Is_Left_As_A_Filter()
+    {
+        var (test, context) = await OpenAsync();
+        await using var owned = test;
+        using var session = context;
+
+        var plan = PlanFor(test, context, context.People.Where(p => !(p.Age > 5 && p.Active)));
+
+        Assert.Null(plan.IndexName);
+    }
+
     [Fact]
     public async Task A_Where_After_An_OrderBy_Is_Still_Absorbed()
     {

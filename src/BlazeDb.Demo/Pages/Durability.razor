@@ -585,7 +585,7 @@
         {
             var before = _table?.Count ?? 0;
             await _db.FlushAsync();
-            _log.Add("Flushed, then abandoned the instance", "no DisposeAsync - the process simply stops");
+            _log.Add("Flushed, then abandoned the instance", "its storage is swapped out first, so nothing it does from now on reaches these bytes");
 
             _generation++;
             await SimulateCrashAsync();

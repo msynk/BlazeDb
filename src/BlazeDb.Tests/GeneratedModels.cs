@@ -65,6 +65,7 @@ public partial class Setting
 [BlazeDbTable("accounts")]
 [BlazeDbCompoundIndex("TenantEmail", nameof(TenantId), nameof(Email), Unique = true)]
 [BlazeDbCompoundOrderedIndex("TenantCreated", nameof(TenantId), nameof(CreatedAt))]
+[BlazeDbCompoundOrderedIndex("TenantUsername", nameof(TenantId), nameof(Username))]
 public partial class Account
 {
     [BlazeDbKey]
@@ -76,6 +77,7 @@ public partial class Account
     [BlazeDbIndex]
     public int TenantId { get; set; }
 
+    [BlazeDbOrderedIndex]
     public string Email { get; set; } = "";
 
     [BlazeDbOrderedIndex(Unique = true)]

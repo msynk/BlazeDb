@@ -133,7 +133,7 @@
                     <dd class="@(_decoded.Transient == "computed at runtime" ? "ok-text" : "err-text")">@_decoded.Transient</dd>
                 </dl>
                 <p class="tiny muted mt-2 mb-0">
-                    <code>Transient</code> carries <code>[Ignore]</code>, so it comes back as its field
+                    <code>Transient</code> carries <code>[BlazeDbIgnore]</code>, so it comes back as its field
                     initialiser rather than the value that was written.
                 </p>
             </Panel>
@@ -182,13 +182,13 @@
                     does not notice.
                 </p>
                 <p class="small mb-0">
-                    The trade-off is that numbers are the contract. Without <code>[Field]</code> they are
+                    The trade-off is that numbers are the contract. Without <code>[BlazeDbField]</code> they are
                     assigned by declaration order, so inserting a property in the middle shifts every
                     number after it and silently reinterprets existing data.
                 </p>
             </Panel>
             <Callout Tone="warn" Title="Pin your numbers before you ship.">
-                Add <code>[Field(n)]</code> to every property once real data exists. After that you can
+                Add <code>[BlazeDbField(n)]</code> to every property once real data exists. After that you can
                 reorder, rename and delete properties safely - only the numbers matter.
             </Callout>
         </div>
@@ -243,7 +243,7 @@
 <Section Title="Keys and explicit numbering" IconName="key"
          Lead="Keys are serialized separately from rows - the log needs a key on its own to record a delete.">
     <div class="grid grid-2">
-        <Panel Title="Setting - [Field(1)], [Field(2)], [Field(3)]" IconName="file" Flush="true">
+        <Panel Title="Setting - [BlazeDbField(1)], [BlazeDbField(2)], [BlazeDbField(3)]" IconName="file" Flush="true">
             <Actions>
                 <span class="panel-sub mono">@_settingBytes.Length bytes</span>
             </Actions>

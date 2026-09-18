@@ -78,6 +78,22 @@ internal static class BlazeDbDiagnostics
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor InheritedProperties = new(
+        "BLZ012",
+        "Table type inherits properties",
+        "Type '{0}' inherits property '{2}' from '{1}'; BlazeDb serializes only a table type's own properties, so an inherited one would silently never be persisted. Declare it on '{0}' or mark it [BlazeDbIgnore].",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor InvalidIndexName = new(
+        "BLZ011",
+        "Index name must be a valid identifier",
+        "Index name '{1}' on type '{0}' is not a valid C# identifier; it becomes a member of the generated Indexes class",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public static readonly DiagnosticDescriptor UnsupportedTypeShape = new(
         "BLZ007",
         "Unsupported table type shape",

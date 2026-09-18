@@ -17,6 +17,11 @@ public sealed class BlazeDbCompoundOrderedIndexAttribute : Attribute
 
     public string[] PropertyNames { get; }
 
-    /// <summary>Rejects writes that would duplicate the tuple of indexed values.</summary>
+    /// <summary>
+    /// Rejects writes that would duplicate the tuple of indexed values. The tuple is the value, so
+    /// unlike a single-property unique index - where a null value is exempt - two rows that agree
+    /// on every member conflict even where those members are null. (SQL's <c>UNIQUE</c> generally
+    /// treats nulls as distinct and would allow them; this does not.)
+    /// </summary>
     public bool Unique { get; set; }
 }

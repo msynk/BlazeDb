@@ -19,12 +19,14 @@ public sealed class BlazeDbIndexedDbStorage : IBlazeDbQuotaAwareStorage, IDispos
 {
     private readonly JSObject _db;
     private readonly string _lockName;
+    private readonly string? _opfsModuleUrl;
     private bool _disposed;
 
-    private BlazeDbIndexedDbStorage(JSObject db, string lockName)
+    private BlazeDbIndexedDbStorage(JSObject db, string lockName, string? opfsModuleUrl)
     {
         _db = db;
         _lockName = lockName;
+        _opfsModuleUrl = opfsModuleUrl;
     }
 
     /// <summary>
@@ -41,11 +43,18 @@ public sealed class BlazeDbIndexedDbStorage : IBlazeDbQuotaAwareStorage, IDispos
     /// Opens the IndexedDB database backing <paramref name="databaseName"/> and takes its
     /// cross-tab write lock, so the single-writer guarantee matches the OPFS backend's.
     /// </summary>
-    public static async ValueTask<BlazeDbIndexedDbStorage> CreateAsync(string databaseName, string? moduleUrl = null)
+    /// <param name="moduleUrl">Where to load <c>blazedb-idb.js</c> from; by default it is resolved relative to the document base.</param>
+    /// <param name="opfsModuleUrl">
+    /// Where to load <c>blazedb-opfs.js</c> from. This backend needs it as well, because the Web
+    /// Locks election and the storage estimate live in that module; an app that overrides one URL
+    /// almost always has to override both.
+    /// </param>
+    public static async ValueTask<BlazeDbIndexedDbStorage> CreateAsync(
+        string databaseName, string? moduleUrl = null, string? opfsModuleUrl = null)
     {
         await BlazeDbIndexedDbInterop.EnsureModuleAsync(moduleUrl).ConfigureAwait(false);
         // The lock lives in the OPFS module, which owns the Web Locks helpers.
-        await BlazeDbOpfsInterop.EnsureModuleAsync(null).ConfigureAwait(false);
+        await BlazeDbOpfsInterop.EnsureModuleAsync(opfsModuleUrl).ConfigureAwait(false);
 
         var lockName = "blazedb:" + databaseName;
         if (!await BlazeDbOpfsInterop.AcquireLock(lockName).ConfigureAwait(false))
@@ -58,7 +67,7 @@ public sealed class BlazeDbIndexedDbStorage : IBlazeDbQuotaAwareStorage, IDispos
         try
         {
             var db = await BlazeDbIndexedDbInterop.OpenDatabase(databaseName).ConfigureAwait(false);
-            return new BlazeDbIndexedDbStorage(db, lockName);
+            return new BlazeDbIndexedDbStorage(db, lockName, opfsModuleUrl);
         }
         catch
         {
@@ -91,7 +100,7 @@ public sealed class BlazeDbIndexedDbStorage : IBlazeDbQuotaAwareStorage, IDispos
     /// <summary>Origin usage and allowance; the same estimate OPFS reports, since it spans the origin.</summary>
     public async ValueTask<BlazeDbStorageQuota?> GetQuotaAsync(CancellationToken cancellationToken = default)
     {
-        await BlazeDbOpfsInterop.EnsureModuleAsync(null).ConfigureAwait(false);
+        await BlazeDbOpfsInterop.EnsureModuleAsync(_opfsModuleUrl).ConfigureAwait(false);
         using var estimate = await BlazeDbOpfsInterop.StorageEstimate().ConfigureAwait(false);
         return BlazeDbOpfsStorage.ReadEstimate(estimate);
     }

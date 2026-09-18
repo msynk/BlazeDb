@@ -107,7 +107,7 @@ public sealed class BlazeDbQuery<TKey, TRow>
         return this;
     }
 
-    /// <summary>Ordered-index range scan with boxed bounds. See <see cref="UseIndexBoxed(IndexDefinition{TRow}, object)"/>.</summary>
+    /// <summary>Ordered-index range scan with boxed bounds. See <see cref="UseIndexBoxed(BlazeDbIndexDefinition{TRow}, object)"/>.</summary>
     internal BlazeDbQuery<TKey, TRow> UseIndexBoxed(
         BlazeDbIndexDefinition<TRow> index, bool hasFrom, object? from, bool hasTo, object? to, bool descending)
     {
@@ -200,6 +200,7 @@ public sealed class BlazeDbQuery<TKey, TRow>
     /// <see cref="Execute"/> - batches resume the same underlying enumerator.
     /// </summary>
     /// <param name="batchSize">Rows to emit between yields. Larger is faster, smaller is smoother.</param>
+    /// <param name="cancellationToken">Checked once per row, between yields.</param>
     public async IAsyncEnumerable<TRow> ExecuteAsync(
         int batchSize = 512,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)

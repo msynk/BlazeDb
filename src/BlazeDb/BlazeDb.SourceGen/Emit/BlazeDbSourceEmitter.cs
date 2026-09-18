@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace BlazeDb.SourceGen;
 
@@ -12,8 +13,15 @@ internal static class BlazeDbSourceEmitter
 
     private static string Bool(bool value) => value ? "true" : "false";
 
+    /// <summary>
+    /// A C# string literal for <paramref name="value"/>. Table names come straight from an
+    /// attribute argument and can hold a quote or a backslash; index names are validated as
+    /// identifiers, but go through the same helper so there is one rule rather than two.
+    /// </summary>
+    private static string Literal(string value) => SymbolDisplay.FormatLiteral(value, quote: true);
+
     private static string Members(params string[] names) =>
-        "new string[] { " + string.Join(", ", Array.ConvertAll(names, n => "\"" + n + "\"")) + " }";
+        "new string[] { " + string.Join(", ", Array.ConvertAll(names, Literal)) + " }";
 
     public static string Emit(BlazeDbTableModel model)
     {
@@ -61,14 +69,14 @@ internal static class BlazeDbSourceEmitter
 
         sb.AppendLine($"{indent}    /// <summary>Generated BlazeDb table descriptor for this type.</summary>");
         sb.AppendLine($"{indent}    public static readonly global::BlazeDb.BlazeDbTableDescriptor<{keyType}, {self}> Table = new(");
-        sb.AppendLine($"{indent}        \"{model.TableName}\",");
+        sb.AppendLine($"{indent}        {Literal(model.TableName)},");
         sb.AppendLine($"{indent}        static row => row.{key.Name},");
         sb.AppendLine($"{indent}        __BlazeWriteRow,");
         sb.AppendLine($"{indent}        __BlazeReadRow,");
         sb.AppendLine($"{indent}        __BlazeWriteKey,");
         sb.AppendLine($"{indent}        __BlazeReadKey,");
         sb.AppendLine($"{indent}        {indexArg},");
-        sb.AppendLine($"{indent}        keyMember: \"{key.Name}\");");
+        sb.AppendLine($"{indent}        keyMember: {Literal(key.Name)});");
         sb.AppendLine();
 
         // Index definitions.
@@ -82,12 +90,12 @@ internal static class BlazeDbSourceEmitter
                 if (prop.HashIndexName != null)
                 {
                     sb.AppendLine($"{indent}        public static readonly global::BlazeDb.BlazeDbHashIndexDefinition<{self}, {prop.TypeDisplay}> {prop.HashIndexName} =");
-                    sb.AppendLine($"{indent}            new(\"{prop.HashIndexName}\", static row => row.{prop.Name}, null, {Bool(prop.HashIndexUnique)}, {Members(prop.Name)});");
+                    sb.AppendLine($"{indent}            new({Literal(prop.HashIndexName!)}, static row => row.{prop.Name}, null, {Bool(prop.HashIndexUnique)}, {Members(prop.Name)});");
                 }
                 if (prop.OrderedIndexName != null)
                 {
                     sb.AppendLine($"{indent}        public static readonly global::BlazeDb.BlazeDbOrderedIndexDefinition<{self}, {prop.TypeDisplay}> {prop.OrderedIndexName} =");
-                    sb.AppendLine($"{indent}            new(\"{prop.OrderedIndexName}\", static row => row.{prop.Name}, null, {Bool(prop.OrderedIndexUnique)}, {Members(prop.Name)});");
+                    sb.AppendLine($"{indent}            new({Literal(prop.OrderedIndexName!)}, static row => row.{prop.Name}, null, {Bool(prop.OrderedIndexUnique)}, {Members(prop.Name)});");
                 }
             }
             foreach (var compound in model.CompoundIndexes)
@@ -96,7 +104,11 @@ internal static class BlazeDbSourceEmitter
                 var ctor = "(" + string.Join(", ", compound.Props.ConvertAll(p => "row." + p.Name)) + ")";
                 var defType = compound.Ordered ? "BlazeDbOrderedIndexDefinition" : "BlazeDbHashIndexDefinition";
                 sb.AppendLine($"{indent}        public static readonly global::BlazeDb.{defType}<{self}, {tuple}> {compound.Name} =");
-                sb.AppendLine($"{indent}            new(\"{compound.Name}\", static row => {ctor}, null, {Bool(compound.Unique)}, {Members(compound.Props.ConvertAll(p => p.Name).ToArray())});");
+                sb.AppendLine($"{indent}            new({Literal(compound.Name)}, static row => {ctor}, {CompoundComparer(compound)}, {Bool(compound.Unique)}, {Members(compound.Props.ConvertAll(p => p.Name).ToArray())});");
+            }
+            foreach (var compound in model.CompoundIndexes)
+            {
+                EmitCompoundComparer(sb, compound, indent);
             }
             sb.AppendLine($"{indent}    }}");
             sb.AppendLine();
@@ -124,6 +136,52 @@ internal static class BlazeDbSourceEmitter
             sb.AppendLine("}");
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// A value tuple compares its members with <c>Comparer&lt;T&gt;.Default</c>, which for a string
+    /// means the current culture - so the ordinal default a single-property index gets from
+    /// <c>BlazeDbOrderedIndexDefinition</c> cannot reach the members inside a tuple. A compound
+    /// ordered index over a string therefore carries a comparer that walks the members itself,
+    /// identically to the tuple except for comparing strings ordinally. Nothing else needs one:
+    /// hash indexes already compare strings ordinally, through <c>EqualityComparer</c>.
+    /// </summary>
+    private static bool NeedsCompoundComparer(BlazeDbCompoundIndexModel compound) =>
+        compound.Ordered && compound.Props.Exists(p => p.Kind == BlazeDbScalarKind.String);
+
+    private static string CompoundComparer(BlazeDbCompoundIndexModel compound) =>
+        NeedsCompoundComparer(compound) ? $"{ComparerName(compound)}.Instance" : "null";
+
+    private static string ComparerName(BlazeDbCompoundIndexModel compound) => "__Blaze" + compound.Name + "Comparer";
+
+    private static void EmitCompoundComparer(StringBuilder sb, BlazeDbCompoundIndexModel compound, string indent)
+    {
+        if (!NeedsCompoundComparer(compound))
+        {
+            return;
+        }
+
+        var tuple = compound.TupleType;
+        var name = ComparerName(compound);
+        sb.AppendLine();
+        sb.AppendLine($"{indent}        private sealed class {name} : global::System.Collections.Generic.IComparer<{tuple}>");
+        sb.AppendLine($"{indent}        {{");
+        sb.AppendLine($"{indent}            public static readonly {name} Instance = new();");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}            public int Compare({tuple} x, {tuple} y)");
+        sb.AppendLine($"{indent}            {{");
+        sb.AppendLine($"{indent}                int __c;");
+        foreach (var prop in compound.Props)
+        {
+            var compare = prop.Kind == BlazeDbScalarKind.String
+                ? $"global::System.StringComparer.Ordinal.Compare(x.{prop.Name}, y.{prop.Name})"
+                : $"global::System.Collections.Generic.Comparer<{prop.TypeDisplay}>.Default.Compare(x.{prop.Name}, y.{prop.Name})";
+            sb.AppendLine($"{indent}                __c = {compare};");
+            sb.AppendLine($"{indent}                if (__c != 0) return __c;");
+        }
+        sb.AppendLine($"{indent}                return 0;");
+        sb.AppendLine($"{indent}            }}");
+        sb.AppendLine($"{indent}        }}");
     }
 
     private static void EmitWriteRow(StringBuilder sb, BlazeDbTableModel model, string self, string indent)

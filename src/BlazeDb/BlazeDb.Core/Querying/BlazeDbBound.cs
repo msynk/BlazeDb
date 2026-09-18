@@ -2,7 +2,7 @@ namespace BlazeDb;
 
 /// <summary>
 /// An optional inclusive range bound. Implicitly convertible from a value, so call sites read
-/// naturally: <c>table.Range(index, from: date1, to: Bound&lt;DateTime&gt;.Unbounded)</c>.
+/// naturally: <c>table.Range(index, from: date1, to: BlazeDbBound&lt;DateTime&gt;.Unbounded)</c>.
 /// </summary>
 public readonly struct BlazeDbBound<T>
 {

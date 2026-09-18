@@ -17,7 +17,10 @@ namespace BlazeDb.Storage;
 /// <para>
 /// A short trailing frame is treated as a torn write and ignored, matching the WAL's own tolerance
 /// for a half-written tail. A frame that is complete but fails authentication is reported as
-/// corruption rather than silently skipped.
+/// corruption rather than silently skipped. Ignoring a torn tail on the way out is only half the
+/// job: the bytes are still in the file, so the offset it starts at is remembered and the next
+/// append trims the file back to whole frames first - otherwise that append would land behind the
+/// fragment, which would swallow it (and everything after it) on every later read.
 /// </para>
 /// </summary>
 public sealed class BlazeDbEncryptedStorage : IBlazeDbQuotaAwareStorage, IDisposable
@@ -28,6 +31,9 @@ public sealed class BlazeDbEncryptedStorage : IBlazeDbQuotaAwareStorage, IDispos
     private readonly IBlazeDbStorage _inner;
     private readonly IBlazeDbAeadCipher _cipher;
     private readonly bool _ownsCipher;
+
+    // Files whose last read stopped at a torn frame, and the offset that frame starts at.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _tornTails = new();
 
     /// <param name="inner">The storage that ends up holding the ciphertext.</param>
     /// <param name="cipher">The cipher to seal each frame with.</param>
@@ -63,6 +69,9 @@ public sealed class BlazeDbEncryptedStorage : IBlazeDbQuotaAwareStorage, IDispos
     public async ValueTask<byte[]?> ReadAsync(string name, CancellationToken cancellationToken = default)
     {
         var raw = await _inner.ReadAsync(name, cancellationToken).ConfigureAwait(false);
+        // Whatever this read finds is the current truth about the file, so anything a previous one
+        // noted about it is stale.
+        _tornTails.TryRemove(name, out _);
         if (raw is null)
         {
             return null;
@@ -81,6 +90,7 @@ public sealed class BlazeDbEncryptedStorage : IBlazeDbQuotaAwareStorage, IDispos
         {
             if (raw.Length - offset < HeaderSize)
             {
+                RememberTornTail(name, offset);
                 break; // Torn header.
             }
             if (raw[offset] != FormatVersion)
@@ -100,6 +110,7 @@ public sealed class BlazeDbEncryptedStorage : IBlazeDbQuotaAwareStorage, IDispos
             var bodyAt = lengthAt + LengthPrefixSize;
             if (raw.Length - bodyAt < length)
             {
+                RememberTornTail(name, offset);
                 break; // Torn body.
             }
 
@@ -141,6 +152,8 @@ public sealed class BlazeDbEncryptedStorage : IBlazeDbQuotaAwareStorage, IDispos
     {
         var frame = await SealAsync(name, data, cancellationToken).ConfigureAwait(false);
         await _inner.WriteAtomicAsync(name, frame, cancellationToken).ConfigureAwait(false);
+        // The file is now exactly this one frame, so any fragment that was in it is gone.
+        _tornTails.TryRemove(name, out _);
     }
 
     public async ValueTask AppendAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
@@ -150,11 +163,45 @@ public sealed class BlazeDbEncryptedStorage : IBlazeDbQuotaAwareStorage, IDispos
             return;
         }
         var frame = await SealAsync(name, data, cancellationToken).ConfigureAwait(false);
+        await TrimTornTailAsync(name, cancellationToken).ConfigureAwait(false);
         await _inner.AppendAsync(name, frame, cancellationToken).ConfigureAwait(false);
     }
 
-    public ValueTask DeleteAsync(string name, CancellationToken cancellationToken = default) =>
-        _inner.DeleteAsync(name, cancellationToken);
+    public ValueTask DeleteAsync(string name, CancellationToken cancellationToken = default)
+    {
+        _tornTails.TryRemove(name, out _);
+        return _inner.DeleteAsync(name, cancellationToken);
+    }
+
+    /// <summary>
+    /// Notes where a frame the last read could not finish begins, so the next append can cut it
+    /// off. Zero-length would mean the file holds nothing whole, which a rewrite still handles.
+    /// </summary>
+    private void RememberTornTail(string name, long offset) => _tornTails[name] = offset;
+
+    /// <summary>
+    /// Rewrites a file back to the frames that were whole, discarding a fragment a crash left at
+    /// the end. Done here, immediately before an append, rather than during the read that found it:
+    /// a read must stay a read, not least because a read-only replica shares this code and has no
+    /// business repairing the writer's files.
+    /// </summary>
+    private async ValueTask TrimTornTailAsync(string name, CancellationToken cancellationToken)
+    {
+        if (!_tornTails.TryGetValue(name, out var validLength))
+        {
+            return;
+        }
+        var raw = await _inner.ReadAsync(name, cancellationToken).ConfigureAwait(false);
+        if (raw is not null && raw.Length > validLength)
+        {
+            await _inner
+                .WriteAtomicAsync(name, raw.AsMemory(0, (int)validLength), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        // Cleared only now: a failed rewrite has to be retried, or the append it was making room
+        // for would land behind the fragment after all.
+        _tornTails.TryRemove(name, out _);
+    }
 
     /// <summary>
     /// Passes the wrapped backend's estimate through, so encrypting a browser database does not

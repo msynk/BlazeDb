@@ -68,6 +68,14 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
             return result;
         }
 
+        if (FindInheritedProperty(symbol) is { } inherited)
+        {
+            result.Diagnostics.Add(new BlazeDbDiagnosticInfo(
+                BlazeDbDiagnostics.InheritedProperties, location, typeName,
+                inherited.ContainingType.Name, inherited.Name));
+            return result;
+        }
+
         var tableName = ctx.Attributes[0].ConstructorArguments.Length > 0
             ? ctx.Attributes[0].ConstructorArguments[0].Value as string
             : null;
@@ -181,7 +189,11 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
         model.Key = keys[0];
 
         BuildCompoundIndexes(symbol, model, result, location, typeName);
-        ValidateIndexNames(model, result, location, typeName);
+        if (!ValidateIndexNames(model, result, location, typeName))
+        {
+            // Emitting anyway would bury the diagnostic under syntax errors in generated code.
+            return result;
+        }
 
         result.Model = model;
         return result;
@@ -241,19 +253,69 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
         }
     }
 
-    private static void ValidateIndexNames(
+    /// <summary>Returns false when a name makes the generated <c>Indexes</c> class impossible.</summary>
+    private static bool ValidateIndexNames(
         BlazeDbTableModel model, BlazeDbGenerationResult result, Location? location, string typeName)
     {
+        var valid = true;
         var seen = new HashSet<string>();
         foreach (var name in model.Props.Select(p => p.HashIndexName)
                      .Concat(model.Props.Select(p => p.OrderedIndexName))
                      .Concat(model.CompoundIndexes.Select(c => c.Name)))
         {
-            if (name != null && !seen.Add(name))
+            if (name is null)
+            {
+                continue;
+            }
+            // An index name is emitted as a member of the generated Indexes class, so anything that
+            // is not an identifier would surface as a syntax error in generated code instead of as
+            // a diagnostic pointing at the attribute that caused it.
+            if (!SyntaxFacts.IsValidIdentifier(name))
+            {
+                result.Diagnostics.Add(new BlazeDbDiagnosticInfo(BlazeDbDiagnostics.InvalidIndexName, location, typeName, name));
+                valid = false;
+                continue;
+            }
+            if (!seen.Add(name))
             {
                 result.Diagnostics.Add(new BlazeDbDiagnosticInfo(BlazeDbDiagnostics.DuplicateIndexName, location, typeName, name));
+                valid = false;
             }
         }
+        return valid;
+    }
+
+    /// <summary>
+    /// The first property a table type inherits that a reader would expect to be persisted. The
+    /// generator only walks a type's own members, so an inherited one would be left out of every
+    /// row without a word - refusing the type is the lesser evil. <c>[BlazeDbIgnore]</c> on the
+    /// base property says the omission is intended.
+    /// </summary>
+    private static IPropertySymbol? FindInheritedProperty(INamedTypeSymbol symbol)
+    {
+        for (var baseType = symbol.BaseType;
+             baseType is { TypeKind: TypeKind.Class, SpecialType: not SpecialType.System_Object };
+             baseType = baseType.BaseType)
+        {
+            foreach (var member in baseType.GetMembers())
+            {
+                if (member is IPropertySymbol
+                    {
+                        IsStatic: false,
+                        IsIndexer: false,
+                        IsImplicitlyDeclared: false,
+                        DeclaredAccessibility: Accessibility.Public,
+                        GetMethod: not null,
+                        SetMethod: { DeclaredAccessibility: Accessibility.Public },
+                    } prop &&
+                    !HasAttribute(prop.GetAttributes(), IgnoreAttributeName) &&
+                    Categorize(prop.Type) is not null)
+                {
+                    return prop;
+                }
+            }
+        }
+        return null;
     }
 
     private static BlazeDbPropModel? Categorize(ITypeSymbol type)

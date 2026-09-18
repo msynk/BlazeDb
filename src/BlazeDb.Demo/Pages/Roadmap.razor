@@ -44,7 +44,7 @@
                         </tr>
                         <tr>
                             <td class="mono">DbSet&lt;T&gt;</td>
-                            <td class="mono">Table&lt;TKey, TRow&gt;</td>
+                            <td class="mono">BlazeDbTable&lt;TKey, TRow&gt;</td>
                             <td class="small muted">entity type to descriptor, generated or model-driven</td>
                         </tr>
                         <tr>
@@ -196,7 +196,7 @@
             "todos", "See it driving a real app"),
 
         new("Source-generated schema", "schema", "BlazeDb.SourceGen",
-            "An incremental Roslyn generator turns [Table], [Key], [Index], [OrderedIndex], [Field] and [Ignore] into a descriptor with binary serializers, a key extractor and index definitions. No runtime reflection, so trimming and AOT are safe.",
+            "An incremental Roslyn generator turns [BlazeDbTable], [BlazeDbKey], [BlazeDbIndex], [BlazeDbOrderedIndex], [BlazeDbField] and [BlazeDbIgnore] into a descriptor with binary serializers, a key extractor and index definitions. No runtime reflection, so trimming and AOT are safe.",
             "schema", "Inspect the generated descriptor"),
 
         new("Hash and ordered indexes", "index", "BlazeDb.Core",
@@ -236,7 +236,7 @@
             null, ""),
 
         new("Compound indexes", "index", "BlazeDb.Core",
-            "[CompoundIndex] and [CompoundOrderedIndex] build an index keyed by a value tuple, so a filter on several members resolves to one lookup. Ordered ones sort lexicographically, which keeps a leading-key prefix a single contiguous scan.",
+            "[BlazeDbCompoundIndex] and [BlazeDbCompoundOrderedIndex] build an index keyed by a value tuple, so a filter on several members resolves to one lookup. Ordered ones sort lexicographically, which keeps a leading-key prefix a single contiguous scan.",
             null, ""),
 
         new("Streaming query results", "query", "BlazeDb.Querying",

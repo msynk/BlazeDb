@@ -78,7 +78,7 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
 
     /// <summary>
     /// Rows whose indexed value lies in the inclusive range [from, to], in index order.
-    /// Use <see cref="Bound{T}.Unbounded"/> for an open end.
+    /// Use <see cref="BlazeDbBound{T}.Unbounded"/> for an open end.
     /// </summary>
     public IEnumerable<TRow> Range<TIndexKey>(
         BlazeDbOrderedIndexDefinition<TRow, TIndexKey> index,
@@ -90,7 +90,7 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
 
     /// <summary>
     /// Equality lookup against an index chosen at runtime. See
-    /// <see cref="IIndexStore{TRow}.LookupBoxed"/> - this exists for the EF Core provider, which
+    /// <see cref="IBlazeDbIndexStore{TRow}.LookupBoxed"/> - this exists for the EF Core provider, which
     /// picks an index from a LINQ predicate and has no static knowledge of the key type.
     /// </summary>
     internal IEnumerable<TRow> LookupBoxed(BlazeDbIndexDefinition<TRow> index, object key) =>
@@ -236,8 +236,12 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
         ValidateUnique(row, old.Seq);
 
         // Point the entry at the pre-mutation values so the write's index maintenance retracts the
-        // entries that actually exist (and so a rollback restores them).
-        _rows[key] = new Entry(previousValues, old.Seq);
+        // entries that actually exist (and so a rollback restores them). Under the lock like every
+        // other mutation: the background flusher walks this map to build a snapshot.
+        lock (_db.SyncRoot)
+        {
+            _rows[key] = new Entry(previousValues, old.Seq);
+        }
         _db.ApplyWrite(new SetOp(this, key, row, hadOld: true, previousValues, old.Seq));
     }
 
@@ -252,7 +256,10 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
         {
             return false;
         }
-        _rows[key] = new Entry(previousValues, old.Seq);
+        lock (_db.SyncRoot)
+        {
+            _rows[key] = new Entry(previousValues, old.Seq);
+        }
         _db.ApplyWrite(new DeleteOp(this, key, previousValues, old.Seq));
         return true;
     }
@@ -341,6 +348,18 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
     void IBlazeDbTableInternal.LoadSnapshot(ref BlazeDbBufferReader reader)
     {
         var count = checked((int)reader.ReadVarUInt());
+        if (count < 0)
+        {
+            throw new InvalidDataException($"Snapshot of table '{Name}' declares a negative row count.");
+        }
+        // Every row costs at least a length prefix, so a count larger than the bytes left cannot be
+        // honest. Checking before reserving capacity keeps a corrupt count an error rather than an
+        // out-of-memory kill; the loop below would have caught it, but only after the allocation.
+        if (count > reader.Remaining)
+        {
+            throw new InvalidDataException(
+                $"Snapshot of table '{Name}' declares {count} rows but only {reader.Remaining} bytes remain.");
+        }
         _rows.EnsureCapacity(count);
         for (var i = 0; i < count; i++)
         {

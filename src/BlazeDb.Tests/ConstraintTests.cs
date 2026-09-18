@@ -160,6 +160,42 @@ public class ConstraintTests
     }
 
     [Fact]
+    public async Task Ordered_String_Index_Sorts_Ordinally_Not_By_Culture()
+    {
+        // The current culture would put "apple" before "Banana"; ordinal goes by code unit, which
+        // is what makes a range answer the same question on every machine that opens the database
+        // and is how the hash index and the primary-key dictionary already compare strings.
+        var (db, accounts) = await OpenAsync();
+        await using var _ = db;
+        accounts.Insert(Make(1, "a", email: "apple"));
+        accounts.Insert(Make(2, "b", email: "Banana"));
+        accounts.Insert(Make(3, "c", email: "Cherry"));
+
+        Assert.Equal(
+            ["Banana", "Cherry", "apple"],
+            accounts.OrderBy(Account.Indexes.Email).Select(a => a.Email));
+        Assert.Equal(
+            ["Banana", "Cherry"],
+            accounts.Range(Account.Indexes.Email, "B", "D").Select(a => a.Email));
+    }
+
+    [Fact]
+    public async Task Compound_Ordered_Index_Sorts_Its_String_Member_Ordinally()
+    {
+        // A value tuple compares its members with Comparer<T>.Default, so the ordinal default has
+        // to reach inside the tuple too, or the two index kinds would disagree on string order.
+        var (db, accounts) = await OpenAsync();
+        await using var _ = db;
+        accounts.Insert(Make(1, "apple", tenant: 1));
+        accounts.Insert(Make(2, "Banana", tenant: 1));
+        accounts.Insert(Make(3, "zebra", tenant: 2));
+
+        Assert.Equal(
+            ["Banana", "apple"],
+            accounts.Range(Account.Indexes.TenantUsername, (1, ""), (1, "\uFFFF")).Select(a => a.Username));
+    }
+
+    [Fact]
     public async Task Compound_Indexes_Track_Updates_And_Deletes()
     {
         var (db, accounts) = await OpenAsync();

@@ -31,7 +31,12 @@ internal sealed class BlazeDbEfCoreDatabase : IDatabase
             return 0;
         }
 
-        using var transaction = _tables.Database.BeginTransaction();
+        // The engine's transactions are ambient - while one is open every table write on the
+        // database joins it - so a save made inside a transaction the application opened becomes
+        // part of that transaction instead of failing as a nested one. It is still atomic; the
+        // boundary is just the outer scope's, which is what the application asked for.
+        var database = _tables.Database;
+        using var transaction = database.HasActiveTransaction ? null : database.BeginTransaction();
         var count = 0;
 
         foreach (var entry in entries)
@@ -55,7 +60,7 @@ internal sealed class BlazeDbEfCoreDatabase : IDatabase
             count++;
         }
 
-        transaction.Commit();
+        transaction?.Commit();
         return count;
     }
 

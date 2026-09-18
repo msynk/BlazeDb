@@ -23,6 +23,10 @@ public partial class Person
 
     [BlazeDbIndex(Unique = true)]
     public string? Email { get; set; }
+
+    /// <summary>A bool under an index, so <c>Where(p =&gt; !p.Active)</c> has one to reach for.</summary>
+    [BlazeDbIndex]
+    public bool Active { get; set; }
 }
 
 /// <summary>A second table, so saves spanning two tables can be shown to be one transaction.</summary>

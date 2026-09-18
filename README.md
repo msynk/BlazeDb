@@ -156,6 +156,10 @@ var replica = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
 await BlazeDbTabSync.CreateReplicaAsync("mydb", replica, onChanged: RefreshUiAsync);
 ```
 
+`CreateReadOnlyAsync` returns `null` when the database does not exist yet, rather than creating an
+empty one: a replica that opens before the writer has written anything should wait for it, not
+invent a database of its own.
+
 Where OPFS is unavailable (Firefox private windows, older Safari), swap in `BlazeDbIndexedDbStorage`:
 
 ```csharp

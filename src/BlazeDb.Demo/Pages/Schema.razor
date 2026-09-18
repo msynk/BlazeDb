@@ -64,7 +64,7 @@
                 </table>
             </div>
             <p class="small muted mt-2">
-                <code>ByPriority</code> is named through <code>[Index(Name = "ByPriority")]</code>; the
+                <code>ByPriority</code> is named through <code>[BlazeDbIndex(Name = "ByPriority")]</code>; the
                 others default to their property name.
             </p>
         </Panel>
@@ -86,47 +86,47 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td class="mono strong">[Table(name?)]</td>
+                        <td class="mono strong">[BlazeDbTable(name?)]</td>
                         <td>class · struct</td>
                         <td>Marks a <code>partial</code> type as a table. The name defaults to the type name and becomes the persisted table identity.</td>
                     </tr>
                     <tr>
-                        <td class="mono strong">[Key]</td>
+                        <td class="mono strong">[BlazeDbKey]</td>
                         <td>property</td>
                         <td>Exactly one per table. Must be a non-nullable scalar - <code>int?</code>, <code>string?</code> and <code>byte[]</code> are rejected.</td>
                     </tr>
                     <tr>
-                        <td class="mono strong">[Index]</td>
+                        <td class="mono strong">[BlazeDbIndex]</td>
                         <td>property</td>
                         <td>Hash equality index for O(1) <code>Lookup</code> and <code>CountBy</code>. Optional <code>Name</code>.</td>
                     </tr>
                     <tr>
-                        <td class="mono strong">[OrderedIndex]</td>
+                        <td class="mono strong">[BlazeDbOrderedIndex]</td>
                         <td>property</td>
                         <td>Ordered index for <code>OrderBy</code> and <code>Range</code>. A property may carry both index attributes.</td>
                     </tr>
                     <tr>
-                        <td class="mono strong">[Field(n)]</td>
+                        <td class="mono strong">[BlazeDbField(n)]</td>
                         <td>property</td>
                         <td>Pins the wire field number. Without it numbers follow declaration order, so reordering properties would break existing data.</td>
                     </tr>
                     <tr>
-                        <td class="mono strong">[Ignore]</td>
+                        <td class="mono strong">[BlazeDbIgnore]</td>
                         <td>property</td>
                         <td>Excluded from serialization entirely. Still a normal property in memory.</td>
                     </tr>
                     <tr>
-                        <td class="mono strong">[Index(Unique = true)]</td>
+                        <td class="mono strong">[BlazeDbIndex(Unique = true)]</td>
                         <td>property</td>
                         <td>Either index attribute can be unique: a write that would duplicate a non-null value throws <code>BlazeDbUniqueConstraintViolationException</code> before anything is changed.</td>
                     </tr>
                     <tr>
-                        <td class="mono strong">[CompoundIndex(name, props…)]</td>
+                        <td class="mono strong">[BlazeDbCompoundIndex(name, props…)]</td>
                         <td>class · struct</td>
                         <td>One hash index over several properties, keyed by their value tuple, so a filter on all of them is a single lookup. Repeatable; optional <code>Unique</code>.</td>
                     </tr>
                     <tr>
-                        <td class="mono strong">[CompoundOrderedIndex(name, props…)]</td>
+                        <td class="mono strong">[BlazeDbCompoundOrderedIndex(name, props…)]</td>
                         <td>class · struct</td>
                         <td>The ordered equivalent: rows sort by the tuple, so a range over a leading-property prefix is one contiguous scan.</td>
                     </tr>
@@ -135,7 +135,7 @@
         </div>
     </Panel>
 
-    <Callout Tone="ok" Title="Proof that [Ignore] is honoured.">
+    <Callout Tone="ok" Title="Proof that [BlazeDbIgnore] is honoured.">
         A row with <code>Transient = "@IgnoreProbeInput"</code> was serialized and read back through the
         generated <code>BlazeDbRowWriter</code>/<code>BlazeDbRowReader</code>; the decoded value is
         <code>"@_ignoreProbeResult"</code> - the field initialiser, not the value that was written.
@@ -174,7 +174,12 @@
                     <li><code>T?</code> for any supported value scalar - omitted from the wire when null.</li>
                     <li><code>string?</code> - omitted when null.</li>
                     <li><code>T[]</code> and <code>List&lt;T&gt;</code> of any supported scalar - written as repeated tags.</li>
-                    <li>A null collection is omitted; a non-null empty one round-trips as empty.</li>
+                    <li>
+                        An empty collection writes no tags, so it is indistinguishable from a null one
+                        on the wire. A non-nullable property therefore reads back empty, and a
+                        <code>List&lt;T&gt;?</code> or <code>T[]?</code> reads back <em>null</em> - if that
+                        difference matters, declare the property non-nullable.
+                    </li>
                 </ul>
             </Panel>
 
@@ -184,6 +189,7 @@
                     <li><code>Dictionary&lt;,&gt;</code>, <code>HashSet&lt;T&gt;</code>, <code>IEnumerable&lt;T&gt;</code>.</li>
                     <li><code>byte[]</code> as a collection element - <code>List&lt;byte[]&gt;</code> is out.</li>
                     <li>Generic or nested table types.</li>
+                    <li>Inherited properties - only a table type's own properties are serialized.</li>
                     <li>Properties without both a getter and a setter - silently skipped.</li>
                     <li>Indexing a collection property.</li>
                 </ul>
@@ -208,12 +214,12 @@
                     <tr>
                         <td class="mono strong">BLZ001</td>
                         <td>Table type must be partial</td>
-                        <td class="mono">[Table] class Foo</td>
+                        <td class="mono">[BlazeDbTable] class Foo</td>
                     </tr>
                     <tr>
                         <td class="mono strong">BLZ002</td>
-                        <td>Exactly one [Key] property required</td>
-                        <td class="mono">no [Key], or two of them</td>
+                        <td>Exactly one [BlazeDbKey] property required</td>
+                        <td class="mono">no [BlazeDbKey], or two of them</td>
                     </tr>
                     <tr>
                         <td class="mono strong">BLZ003</td>
@@ -228,32 +234,42 @@
                     <tr>
                         <td class="mono strong">BLZ005</td>
                         <td>Duplicate field number</td>
-                        <td class="mono">two properties with [Field(1)]</td>
+                        <td class="mono">two properties with [BlazeDbField(1)]</td>
                     </tr>
                     <tr>
                         <td class="mono strong">BLZ006</td>
                         <td>Unsupported key type</td>
-                        <td class="mono">[Key] string? Id { get; set; }</td>
+                        <td class="mono">[BlazeDbKey] string? Id { get; set; }</td>
                     </tr>
                     <tr>
                         <td class="mono strong">BLZ007</td>
                         <td>Generic or nested table type</td>
-                        <td class="mono">[Table] partial class Foo&lt;T&gt;</td>
+                        <td class="mono">[BlazeDbTable] partial class Foo&lt;T&gt;</td>
                     </tr>
                     <tr>
                         <td class="mono strong">BLZ008</td>
                         <td>Compound index names an unknown property</td>
-                        <td class="mono">[CompoundIndex("X", "Nope")]</td>
+                        <td class="mono">[BlazeDbCompoundIndex("X", "Nope")]</td>
                     </tr>
                     <tr>
                         <td class="mono strong">BLZ009</td>
                         <td>Compound index needs at least two properties</td>
-                        <td class="mono">[CompoundIndex("X", "Only")]</td>
+                        <td class="mono">[BlazeDbCompoundIndex("X", "Only")]</td>
                     </tr>
                     <tr>
                         <td class="mono strong">BLZ010</td>
                         <td>Duplicate index name</td>
-                        <td class="mono">[Index(Name = "A")] twice</td>
+                        <td class="mono">[BlazeDbIndex(Name = "A")] twice</td>
+                    </tr>
+                    <tr>
+                        <td class="mono strong">BLZ011</td>
+                        <td>Index name is not a valid identifier</td>
+                        <td class="mono">[BlazeDbIndex(Name = "by name")]</td>
+                    </tr>
+                    <tr>
+                        <td class="mono strong">BLZ012</td>
+                        <td>Table type inherits properties</td>
+                        <td class="mono">partial class Foo : HasProps</td>
                     </tr>
                 </tbody>
             </table>
@@ -261,7 +277,7 @@
     </Panel>
     <Callout Tone="info" Title="Requirements at a glance.">
         A table type must be <code>partial</code>, top level, non-generic, have exactly one
-        <code>[Key]</code> and - if it is a class - a parameterless constructor. Records work as long
+        <code>[BlazeDbKey]</code> and - if it is a class - a parameterless constructor. Records work as long
         as they are not positional-only.
     </Callout>
 </Section>
@@ -438,7 +454,7 @@
         [BlazeDbTable("settings")]
         public partial class Setting
         {
-            [BlazeDbField(1)][Key] public string Name { get; set; } = "";
+            [BlazeDbField(1)][BlazeDbKey] public string Name { get; set; } = "";
             [BlazeDbField(2)] public string Value { get; set; } = "";
             [BlazeDbField(3)] public DateTime UpdatedAt { get; set; }
         }

@@ -30,7 +30,9 @@ public abstract class BlazeDbIndexDefinition<TRow>
 
     /// <summary>
     /// When true, no two rows may share an indexed value. Rows whose indexed value is null are
-    /// exempt, matching the treatment of nulls everywhere else in the indexing layer.
+    /// exempt, matching the treatment of nulls everywhere else in the indexing layer. A compound
+    /// index is keyed on a value tuple, which is never itself null, so its members being null does
+    /// not exempt a row - see the compound index attributes.
     /// </summary>
     public bool IsUnique { get; }
 
