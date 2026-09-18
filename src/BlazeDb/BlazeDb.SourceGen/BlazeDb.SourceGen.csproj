@@ -6,6 +6,8 @@
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <NoWarn>$(NoWarn);RS2008</NoWarn>
     <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Packed inside the BlazeDb package (analyzers/dotnet/cs), not published on its own. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

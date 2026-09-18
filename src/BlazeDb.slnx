@@ -1,7 +1,7 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="BlazeDb/BlazeDb/BlazeDb.csproj" />
     <Project Path="BlazeDb/BlazeDb.Browser/BlazeDb.Browser.csproj" />
-    <Project Path="BlazeDb/BlazeDb.Core/BlazeDb.Core.csproj" />
     <Project Path="BlazeDb/BlazeDb.EntityFrameworkCore/BlazeDb.EntityFrameworkCore.csproj" />
     <Project Path="BlazeDb/BlazeDb.SourceGen/BlazeDb.SourceGen.csproj" />
   </Folder>

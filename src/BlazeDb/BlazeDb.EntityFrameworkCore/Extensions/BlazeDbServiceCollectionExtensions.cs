@@ -19,6 +19,10 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// <summary>Registers the BlazeDb provider's services.</summary>
 public static class BlazeDbServiceCollectionExtensions
 {
+    /// <summary>
+    /// Registers BlazeDb's EF Core services. Called by <c>UseBlazeDb</c>; applications almost
+    /// never need to invoke this directly.
+    /// </summary>
     public static IServiceCollection AddEntityFrameworkBlazeDb(this IServiceCollection serviceCollection)
     {
         ArgumentNullException.ThrowIfNull(serviceCollection);

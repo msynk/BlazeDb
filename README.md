@@ -23,17 +23,31 @@ BlazeDb eliminates all three:
   UI, storage-quota awareness instead of surprise write failures, encryption through WebCrypto,
   and a single-writer model with read-only replica tabs.
 
+## Install
+
+```bash
+dotnet add package BlazeDb                     # engine + source generator
+dotnet add package BlazeDb.Browser             # OPFS, IndexedDB, WebCrypto, tabs
+dotnet add package BlazeDb.EntityFrameworkCore # UseBlazeDb()
+```
+
+The `BlazeDb` package includes the Roslyn source generator. A `PackageReference` to
+`BlazeDb.EntityFrameworkCore` or `BlazeDb.Browser` pulls `BlazeDb` in as a dependency, and the
+generator still runs (including when those packages are your only direct reference).
+
+Requires the .NET 10 SDK.
+
 ## Projects
 
-| Project | Purpose |
-| --- | --- |
-| `src/BlazeDb/BlazeDb.Core` | The engine: tables, indexes, transactions, WAL/snapshot persistence, storage abstraction. No browser dependencies. |
-| `src/BlazeDb/BlazeDb.SourceGen` | Roslyn incremental source generator: binary serializers, key extractors, schema metadata for `[BlazeDbTable]` types. |
-| `src/BlazeDb/BlazeDb.Browser` | OPFS and IndexedDB storage backends (`[JSImport]` ES modules), Web Locks single-writer election, WebCrypto cipher, cross-tab sync. |
-| `src/BlazeDb/BlazeDb.EntityFrameworkCore` | EF Core provider: `UseBlazeDb`, change tracking over live rows, LINQ translated to query plans. |
-| `src/BlazeDb.Benchmarks` | BenchmarkDotNet suite comparing against SQLite. |
-| `src/BlazeDb.Demo` | Blazor WASM app exercising persistence end-to-end in the browser. |
-| `src/BlazeDb.Tests` | Engine and EF Core provider tests, including crash recovery, torn writes, tracking and query plans. |
+| Project | NuGet | Purpose |
+| --- | --- | --- |
+| `src/BlazeDb/BlazeDb` | `BlazeDb` | The engine: tables, indexes, transactions, WAL/snapshot persistence, storage abstraction. No browser dependencies. The source generator is packed into this package. |
+| `src/BlazeDb/BlazeDb.SourceGen` | (bundled) | Roslyn incremental source generator: binary serializers, key extractors, schema metadata for `[BlazeDbTable]` types. |
+| `src/BlazeDb/BlazeDb.Browser` | `BlazeDb.Browser` | OPFS and IndexedDB storage backends (`[JSImport]` ES modules), Web Locks single-writer election, WebCrypto cipher, cross-tab sync. |
+| `src/BlazeDb/BlazeDb.EntityFrameworkCore` | `BlazeDb.EntityFrameworkCore` | EF Core provider: `UseBlazeDb`, change tracking over live rows, LINQ translated to query plans. |
+| `src/BlazeDb.Benchmarks` | — | BenchmarkDotNet suite comparing against SQLite. |
+| `src/BlazeDb.Demo` | — | Blazor WASM app exercising persistence end-to-end in the browser. |
+| `src/BlazeDb.Tests` | — | Engine and EF Core provider tests, including crash recovery, torn writes, tracking and query plans. |
 
 The solution file (`src/BlazeDb.slnx`) and shared build settings (`src/Directory.Build.props`)
 also live under `src/`.
@@ -272,6 +286,14 @@ in the browser rather than describing it.
 ```
 dotnet build src/BlazeDb.slnx
 dotnet test src/BlazeDb.slnx
+dotnet pack src/BlazeDb.slnx -c Release -o artifacts
 ```
 
 The demo app: `dotnet run --project src/BlazeDb.Demo` and open the printed URL.
+
+Pack produces `BlazeDb`, `BlazeDb.Browser` and `BlazeDb.EntityFrameworkCore` (plus `.snupkg`
+symbol packages) under `artifacts/`. Version comes from `VersionPrefix` in
+`src/Directory.Build.props`; override it with `-p:Version=1.2.3`.
+
+Pushing a `v*` tag (for example `v0.1.0`) runs `.github/workflows/release.yml`, which packs
+that version and pushes to NuGet.org. Create a `NUGET_API_KEY` repository secret first.

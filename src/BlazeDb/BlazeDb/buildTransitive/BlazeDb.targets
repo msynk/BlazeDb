@@ -1,0 +1,9 @@
+<Project>
+  <!-- Runs for both a direct PackageReference to BlazeDb and a transitive one (for example
+       BlazeDb.EntityFrameworkCore). Direct references also pick the generator up from the
+       analyzers/ folder; Roslyn de-duplicates the same DLL path. -->
+  <ItemGroup Condition="'$(DisableBlazeDbSourceGenerator)' != 'true'">
+    <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\BlazeDb.SourceGen.dll"
+              Condition="Exists('$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\BlazeDb.SourceGen.dll')" />
+  </ItemGroup>
+</Project>

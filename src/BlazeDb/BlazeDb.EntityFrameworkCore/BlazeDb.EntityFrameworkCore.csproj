@@ -2,8 +2,11 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>BlazeDb.EntityFrameworkCore</PackageId>
+    <Description>Entity Framework Core provider for BlazeDb. UseBlazeDb() maps DbSet types onto the engine's live rows; LINQ is translated onto hash/ordered indexes with no SQL.</Description>
+    <PackageTags>$(PackageTags);efcore;entityframeworkcore;linq</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -11,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BlazeDb.Core\BlazeDb.Core.csproj" />
+    <ProjectReference Include="..\BlazeDb\BlazeDb.csproj" />
   </ItemGroup>
 
   <ItemGroup>

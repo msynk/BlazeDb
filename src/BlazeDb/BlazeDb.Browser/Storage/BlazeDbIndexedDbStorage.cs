@@ -43,6 +43,7 @@ public sealed class BlazeDbIndexedDbStorage : IBlazeDbQuotaAwareStorage, IDispos
     /// Opens the IndexedDB database backing <paramref name="databaseName"/> and takes its
     /// cross-tab write lock, so the single-writer guarantee matches the OPFS backend's.
     /// </summary>
+    /// <param name="databaseName">Name of the IndexedDB database (and of the Web Lock).</param>
     /// <param name="moduleUrl">Where to load <c>blazedb-idb.js</c> from; by default it is resolved relative to the document base.</param>
     /// <param name="opfsModuleUrl">
     /// Where to load <c>blazedb-opfs.js</c> from. This backend needs it as well, because the Web

@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore.Metadata.Conventions.Infrastructure;
 namespace BlazeDb.EntityFrameworkCore.Storage;
 
 /// <summary>Model conventions, minus every relational one.</summary>
-public sealed class BlazeDbConventionSetBuilder : ProviderConventionSetBuilder
+internal sealed class BlazeDbConventionSetBuilder : ProviderConventionSetBuilder
 {
     public BlazeDbConventionSetBuilder(ProviderConventionSetBuilderDependencies dependencies) : base(dependencies)
     {

@@ -6,4 +6,4 @@ namespace BlazeDb.EntityFrameworkCore.Infrastructure;
 /// The provider emits no log events of its own - there is no command to log, no connection to
 /// open and no round trip to time - so this exists only to satisfy the service contract.
 /// </summary>
-public sealed class BlazeDbLoggingDefinitions : LoggingDefinitions;
+internal sealed class BlazeDbLoggingDefinitions : LoggingDefinitions;

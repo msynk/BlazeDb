@@ -7,5 +7,23 @@
          published CVE surfaces in the log without turning every build red. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+
+    <!-- Tests, the demo and benchmarks are not published. Packable projects opt back in. -->
+    <IsPackable>false</IsPackable>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <Authors>Saleh Yusefnejad</Authors>
+    <Copyright>Copyright (c) 2026 Saleh Yusefnejad</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/msynk/BlazeDb</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/msynk/BlazeDb.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryBranch>main</RepositoryBranch>
+    <PackageTags>blazor;wasm;webassembly;database;embedded;efcore;entityframeworkcore;aot;indexeddb;opfs;nosql</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true' or '$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
 </Project>

@@ -1,0 +1,15 @@
+<Project>
+  <!-- IsPackable is set in each project after Directory.Build.props, so README inclusion and
+       XML-doc generation have to live here. -->
+  <PropertyGroup Condition="'$(IsPackable)' == 'true'">
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <DocumentationFile Condition="'$(DocumentationFile)' == ''">$(OutputPath)$(AssemblyName).xml</DocumentationFile>
+    <!-- Public members already carry summaries on the types people call; remaining CS1591s are
+         constructor/property noise that would turn every build red under TreatWarningsAsErrors. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)..\README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+</Project>

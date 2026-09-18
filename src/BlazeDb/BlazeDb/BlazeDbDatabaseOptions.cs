@@ -2,6 +2,10 @@ using BlazeDb.Storage;
 
 namespace BlazeDb;
 
+/// <summary>
+/// Settings for <see cref="BlazeDbDatabase.OpenAsync"/>. Tables must be added with
+/// <see cref="AddTable"/> (or come from the EF Core model when using <c>UseBlazeDb</c>).
+/// </summary>
 public sealed class BlazeDbDatabaseOptions
 {
     /// <summary>
@@ -52,8 +56,10 @@ public sealed class BlazeDbDatabaseOptions
     /// </summary>
     public Action<ulong>? OnCheckpoint { get; set; }
 
+    /// <summary>Descriptors of tables this database will own. Prefer <see cref="AddTable"/>.</summary>
     public List<BlazeDbTableDescriptor> Tables { get; } = [];
 
+    /// <summary>Registers a table. The descriptor is typically the generated <c>Table</c> member on a <c>[BlazeDbTable]</c> type.</summary>
     public BlazeDbDatabaseOptions AddTable(BlazeDbTableDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);

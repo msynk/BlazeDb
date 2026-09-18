@@ -9,7 +9,7 @@ namespace Microsoft.EntityFrameworkCore;
 public static class BlazeDbDbContextOptionsExtensions
 {
     /// <summary>
-    /// Uses an in-memory store named after the context type, so every <typeparamref name="TContext"/>
+    /// Uses an in-memory store named after the context type, so every context of that type
     /// shares one engine - the usual <c>AddDbContext</c> shape. Pass an explicit name or a storage
     /// backend to choose a different store.
     /// </summary>

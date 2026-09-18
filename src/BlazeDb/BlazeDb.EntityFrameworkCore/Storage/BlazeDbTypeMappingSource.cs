@@ -9,7 +9,7 @@ namespace BlazeDb.EntityFrameworkCore.Storage;
 /// The engine keeps every row as a live .NET object, so there is nothing to convert between a
 /// store type and a CLR type. Every type the model can express is mapped as itself.
 /// </summary>
-public sealed class BlazeDbTypeMappingSource : TypeMappingSource
+internal sealed class BlazeDbTypeMappingSource : TypeMappingSource
 {
     public BlazeDbTypeMappingSource(TypeMappingSourceDependencies dependencies) : base(dependencies)
     {

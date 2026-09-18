@@ -1,0 +1,50 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>BlazeDb</PackageId>
+    <Description>Memory-first, SQL-free embedded database engine for .NET. Designed for Blazor WebAssembly: live rows in managed memory, source-generated serializers, and WAL/snapshot persistence with no SQL and no JS interop on the read path.</Description>
+    <PackageTags>$(PackageTags);engine</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The EF Core provider works with tables whose key and row types it only knows at runtime,
+         so it reaches for the boxed index accessors rather than the generic public API. -->
+    <InternalsVisibleTo Include="BlazeDb.EntityFrameworkCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Consuming projects in this repo still add their own analyzer reference: analyzer
+         ProjectReferences do not flow transitively. NuGet consumers get the generator from
+         analyzers/ and from buildTransitive/BlazeDb.targets. -->
+    <ProjectReference Include="..\BlazeDb.SourceGen\BlazeDb.SourceGen.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="buildTransitive\BlazeDb.targets" Pack="true" PackagePath="buildTransitive\" Visible="false" />
+  </ItemGroup>
+
+  <!-- Pack the generator next to the library so `dotnet add package BlazeDb` is enough to
+       compile [BlazeDbTable] types. The path is configuration-specific and the file only
+       exists after SourceGen has built, so this has to be a target rather than a static item. -->
+  <Target Name="_AddSourceGeneratorToPackage" BeforeTargets="_GetPackageFiles">
+    <PropertyGroup>
+      <_BlazeDbSourceGenDll>$(MSBuildThisFileDirectory)..\BlazeDb.SourceGen\bin\$(Configuration)\netstandard2.0\BlazeDb.SourceGen.dll</_BlazeDbSourceGenDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_BlazeDbSourceGenDll)')"
+           Text="BlazeDb.SourceGen.dll was not found at '$(_BlazeDbSourceGenDll)'. Build the source generator before packing." />
+    <ItemGroup>
+      <_PackageFiles Include="$(_BlazeDbSourceGenDll)">
+        <PackagePath>analyzers/dotnet/cs/BlazeDb.SourceGen.dll</PackagePath>
+        <Visible>false</Visible>
+      </_PackageFiles>
+    </ItemGroup>
+  </Target>
+
+</Project>

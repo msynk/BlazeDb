@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BlazeDb\BlazeDb.Core\BlazeDb.Core.csproj" />
+    <ProjectReference Include="..\BlazeDb\BlazeDb\BlazeDb.csproj" />
     <ProjectReference Include="..\BlazeDb\BlazeDb.Browser\BlazeDb.Browser.csproj" />
     <ProjectReference Include="..\BlazeDb\BlazeDb.EntityFrameworkCore\BlazeDb.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\BlazeDb\BlazeDb.SourceGen\BlazeDb.SourceGen.csproj"

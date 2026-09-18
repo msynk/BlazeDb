@@ -116,7 +116,7 @@
 
     private static readonly Feature[] Shipped =
     [
-        new("Tables over live objects", "database", "BlazeDb.Core",
+        new("Tables over live objects", "database", "BlazeDb",
             "A primary-key hash index over the row objects themselves, with Insert, Update, Upsert, Delete, Get, TryGet, Contains and Scan. Reads are synchronous method calls with no I/O and no deserialization.",
             "todos", "See it driving a real app"),
 
@@ -124,7 +124,7 @@
             "An incremental Roslyn generator turns [BlazeDbTable], [BlazeDbKey], [BlazeDbIndex], [BlazeDbOrderedIndex], [BlazeDbField] and [BlazeDbIgnore] into a descriptor with binary serializers, a key extractor and index definitions. No runtime reflection, so trimming and AOT are safe.",
             "schema", "Inspect the generated descriptor"),
 
-        new("Hash and ordered indexes", "index", "BlazeDb.Core",
+        new("Hash and ordered indexes", "index", "BlazeDb",
             "Equality lookups in O(1) and range scans in O(log n) with inclusive or open bounds, maintained automatically on every mutation including rollback.",
             "indexes", "Try the lookups live"),
 
@@ -132,7 +132,7 @@
             "One index source, any number of residual predicates, ordering, paging and projection - the primitive the EF Core provider translates LINQ onto, usable directly too.",
             "queries", "Build a query"),
 
-        new("Atomic transactions", "txn", "BlazeDb.Core",
+        new("Atomic transactions", "txn", "BlazeDb",
             "An ambient single-writer transaction with commit, rollback and reverse-order undo of both rows and index entries. A committed batch is one log record.",
             "transactions", "Watch commit and rollback"),
 
@@ -148,7 +148,7 @@
             "Tagged, length-delimited encoding with varints, absent-means-null fields and unknown-field skipping, so old readers survive new writers.",
             "serialization", "Read the actual bytes"),
 
-        new("Predictable failure", "alert", "BlazeDb.Core",
+        new("Predictable failure", "alert", "BlazeDb",
             "A small exception hierarchy under BlazeDbException, with checksum validation on everything persisted and clear rules about what throws versus what returns false.",
             "errors", "Trigger every one"),
 
@@ -156,11 +156,11 @@
             "OPFS access through a [JSImport] ES module with synchronous access handles, plus Web Locks so a second tab cannot corrupt the first one's files.",
             "storage", "See the browser notes"),
 
-        new("Unique constraints", "shield", "BlazeDb.Core",
+        new("Unique constraints", "shield", "BlazeDb",
             "A uniqueness flag on hash and ordered indexes, checked before anything is mutated so a rejected write leaves the table and its indexes untouched. Null values are exempt, as everywhere else in the indexing layer.",
             null, ""),
 
-        new("Compound indexes", "index", "BlazeDb.Core",
+        new("Compound indexes", "index", "BlazeDb",
             "[BlazeDbCompoundIndex] and [BlazeDbCompoundOrderedIndex] build an index keyed by a value tuple, so a filter on several members resolves to one lookup. Ordered ones sort lexicographically, which keeps a leading-key prefix a single contiguous scan.",
             null, ""),
 
@@ -172,7 +172,7 @@
             "An IBlazeDbStorage decorator that seals every write into an AES-GCM frame, keeping appends genuine appends. The file name is bound in as associated data, and a torn trailing frame is ignored while a tampered one is reported as corruption.",
             null, ""),
 
-        new("Quota-aware persistence", "disk", "BlazeDb.Core",
+        new("Quota-aware persistence", "disk", "BlazeDb",
             "The engine consults navigator.storage estimates before flushing, compacts when space runs short, and refuses deliberately rather than discovering the limit as a failed append. Data stays intact in memory and the flush can be retried.",
             null, ""),
 
@@ -212,7 +212,7 @@
 
     private static readonly Project[] Projects =
     [
-        new("BlazeDb.Core", "The engine: tables, indexes, transactions, WAL and snapshots, storage abstraction. No browser dependency.", "shipped"),
+        new("BlazeDb", "The engine: tables, indexes, transactions, WAL and snapshots, storage abstraction. No browser dependency.", "shipped"),
         new("BlazeDb.SourceGen", "Incremental generator for serializers, key extractors and index definitions.", "shipped"),
         new("BlazeDb.Browser", "OPFS and IndexedDB backends, Web Locks election, WebCrypto, cross-tab sync.", "shipped"),
         new("BlazeDb.EntityFrameworkCore", "The non-relational EF Core provider.", "shipped"),

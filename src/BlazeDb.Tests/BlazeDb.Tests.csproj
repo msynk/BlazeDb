@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BlazeDb\BlazeDb.Core\BlazeDb.Core.csproj" />
+    <ProjectReference Include="..\BlazeDb\BlazeDb\BlazeDb.csproj" />
     <ProjectReference Include="..\BlazeDb\BlazeDb.EntityFrameworkCore\BlazeDb.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\BlazeDb\BlazeDb.SourceGen\BlazeDb.SourceGen.csproj"
                       OutputItemType="Analyzer"
