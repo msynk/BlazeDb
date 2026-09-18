@@ -179,7 +179,12 @@ internal sealed class BlazeDbComparison
     private static bool TryMember(Expression expression, ParameterExpression parameter, out string member, out Type memberType)
     {
         var current = StripQuotes(expression);
-        while (current is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert)
+        // Only a conversion that loses nothing may be looked through: the compiler's widening of
+        // an enum or a narrow integer for the comparison, a lift to Nullable<T>, a box. A narrowing
+        // cast the author wrote - (byte)row.Count == 5 - asks a different question of the member
+        // than the member itself would answer (261 satisfies it too), so it stays a filter.
+        while (current is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert &&
+               IsLossless(convert.Operand.Type, convert.Type))
         {
             current = convert.Operand;
         }
@@ -193,6 +198,47 @@ internal sealed class BlazeDbComparison
         memberType = typeof(object);
         return false;
     }
+
+    /// <summary>
+    /// Whether every value of <paramref name="from"/> survives a conversion to <paramref name="to"/>
+    /// unchanged: a reference or boxing conversion, a lift to <c>Nullable&lt;T&gt;</c>, an enum to its
+    /// underlying type, or a numeric widening that C# performs implicitly.
+    /// </summary>
+    private static bool IsLossless(Type from, Type to)
+    {
+        if (to.IsAssignableFrom(from) || Nullable.GetUnderlyingType(to) == from)
+        {
+            return true;
+        }
+        var source = Nullable.GetUnderlyingType(from) ?? from;
+        var target = Nullable.GetUnderlyingType(to) ?? to;
+        if (source.IsEnum)
+        {
+            source = Enum.GetUnderlyingType(source);
+        }
+        if (target.IsEnum)
+        {
+            return false; // Integer to enum is the reverse of what the compiler emits; do not guess.
+        }
+        return source == target || Widenings.TryGetValue(source, out var wider) && wider.Contains(target);
+    }
+
+    // The implicit numeric conversions of the C# specification that are also exact - the ones the
+    // compiler inserts on its own when it widens an operand for a comparison, minus those it allows
+    // but that can round (int to float, long to double), since a rounded member is no longer the member.
+    private static readonly Dictionary<Type, Type[]> Widenings = new()
+    {
+        [typeof(sbyte)] = [typeof(short), typeof(int), typeof(long), typeof(float), typeof(double), typeof(decimal)],
+        [typeof(byte)] = [typeof(short), typeof(ushort), typeof(int), typeof(uint), typeof(long), typeof(ulong), typeof(float), typeof(double), typeof(decimal)],
+        [typeof(short)] = [typeof(int), typeof(long), typeof(float), typeof(double), typeof(decimal)],
+        [typeof(ushort)] = [typeof(int), typeof(uint), typeof(long), typeof(ulong), typeof(float), typeof(double), typeof(decimal)],
+        [typeof(int)] = [typeof(long), typeof(double), typeof(decimal)],
+        [typeof(uint)] = [typeof(long), typeof(ulong), typeof(double), typeof(decimal)],
+        [typeof(long)] = [typeof(decimal)],
+        [typeof(ulong)] = [typeof(decimal)],
+        [typeof(char)] = [typeof(ushort), typeof(int), typeof(uint), typeof(long), typeof(ulong), typeof(float), typeof(double), typeof(decimal)],
+        [typeof(float)] = [typeof(double)],
+    };
 
     /// <summary>Flips a comparison written the other way round, as in <c>18 &lt;= row.Age</c>.</summary>
     private static ExpressionType Mirror(ExpressionType op) => op switch

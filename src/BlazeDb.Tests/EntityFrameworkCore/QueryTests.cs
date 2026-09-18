@@ -64,6 +64,58 @@ public class QueryTests
     }
 
     [Fact]
+    public void One_Query_Shape_Run_With_Different_Captured_Values_Answers_Each_Correctly()
+    {
+        // Residual predicates and orderings are compiled once per query shape and re-bound to the
+        // values captured by each execution; a stale binding would answer the first call's question.
+        using var test = Seeded();
+        using var context = test.CreateContext();
+
+        var expected = new Dictionary<string, string[]>
+        {
+            ["A"] = ["Ada", "Alan"],
+            ["B"] = ["Barbara"],
+            ["G"] = ["Grace"],
+            ["Z"] = [],
+        };
+        foreach (var (prefix, names) in expected)
+        {
+            var minimumAge = prefix == "A" ? 30 : 0;
+            var descending = prefix == "A";
+            var query = context.People.Where(p => p.Name.StartsWith(prefix) && p.Age >= minimumAge);
+            query = descending ? query.OrderByDescending(p => p.Age) : query.OrderBy(p => p.Age);
+            var actual = query.Select(p => p.Name).ToList();
+            Assert.Equal(names.Order().ToList(), actual.Order().ToList());
+            if (descending)
+            {
+                Assert.Equal(["Alan", "Ada"], actual);
+            }
+        }
+    }
+
+    [Fact]
+    public void Compiled_Delegates_Are_Shared_Between_Executions_Of_One_Shape()
+    {
+        var value = 1;
+        System.Linq.Expressions.Expression<Func<Person, bool>> first = p => p.Age > value;
+        value = 100;
+        System.Linq.Expressions.Expression<Func<Person, bool>> second = p => p.Age > value;
+
+        var one = (Func<Person, bool>)Query.BlazeDbDelegateCache.Compile(first);
+        var two = (Func<Person, bool>)Query.BlazeDbDelegateCache.Compile(second);
+        var person = new Person { Age = 50 };
+
+        // Both lambdas read the same closure, so both see 100 - as the originals would.
+        Assert.False(one(person));
+        Assert.False(two(person));
+        value = 10;
+        Assert.True(one(person));
+
+        // The same compiled body serves both: one method, two bindings.
+        Assert.Equal(one.Method, two.Method);
+    }
+
+    [Fact]
     public void OrderBy_Then_Skip_And_Take_Pages()
     {
         using var test = Seeded();

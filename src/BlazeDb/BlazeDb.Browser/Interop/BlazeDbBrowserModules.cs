@@ -36,6 +36,11 @@ internal static class BlazeDbBrowserModules
         var path = $"_content/BlazeDb.Browser/{moduleName}.js";
         using var document = JSHost.GlobalThis.GetPropertyAsJSObject("document");
         var baseUri = document?.GetPropertyAsString("baseURI");
-        return string.IsNullOrEmpty(baseUri) ? "/" + path : baseUri + path;
+        // Resolved as a relative reference, the way a <script src> would be, rather than by string
+        // concatenation: without a <base href="…/"> the document's baseURI is its own URL, and
+        // "https://host/app/page" + path would name a file that does not exist.
+        return string.IsNullOrEmpty(baseUri) || !Uri.TryCreate(baseUri, UriKind.Absolute, out var baseUrl)
+            ? "/" + path
+            : new Uri(baseUrl, path).AbsoluteUri;
     }
 }

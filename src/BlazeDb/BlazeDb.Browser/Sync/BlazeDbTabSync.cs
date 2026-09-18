@@ -16,14 +16,15 @@ namespace BlazeDb.Browser;
 [SupportedOSPlatform("browser")]
 public sealed class BlazeDbTabSync : IAsyncDisposable
 {
-    private readonly string _channelName;
+    // Each instance owns one BroadcastChannel object, addressed by a handle of its own, so a
+    // publisher and a replica for the same database in one document do not close each other's.
+    private readonly string _handle = Guid.NewGuid().ToString("N");
     private readonly BlazeDbDatabase? _replica;
     private readonly Func<ValueTask>? _onChanged;
     private bool _disposed;
 
-    private BlazeDbTabSync(string channelName, BlazeDbDatabase? replica, Func<ValueTask>? onChanged)
+    private BlazeDbTabSync(BlazeDbDatabase? replica, Func<ValueTask>? onChanged)
     {
-        _channelName = channelName;
         _replica = replica;
         _onChanged = onChanged;
     }
@@ -43,9 +44,9 @@ public sealed class BlazeDbTabSync : IAsyncDisposable
     public static async ValueTask<BlazeDbTabSync> CreatePublisherAsync(string databaseName, string? moduleUrl = null)
     {
         await BlazeDbTabsInterop.EnsureModuleAsync(moduleUrl).ConfigureAwait(false);
-        var channelName = ChannelName(databaseName);
-        BlazeDbTabsInterop.Open(channelName, null);
-        return new BlazeDbTabSync(channelName, replica: null, onChanged: null);
+        var sync = new BlazeDbTabSync(replica: null, onChanged: null);
+        BlazeDbTabsInterop.Open(sync._handle, ChannelName(databaseName), null);
+        return sync;
     }
 
     /// <summary>
@@ -62,9 +63,8 @@ public sealed class BlazeDbTabSync : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(replica);
         await BlazeDbTabsInterop.EnsureModuleAsync(moduleUrl).ConfigureAwait(false);
 
-        var channelName = ChannelName(databaseName);
-        var sync = new BlazeDbTabSync(channelName, replica, onChanged);
-        BlazeDbTabsInterop.Open(channelName, generation =>
+        var sync = new BlazeDbTabSync(replica, onChanged);
+        BlazeDbTabsInterop.Open(sync._handle, ChannelName(databaseName), generation =>
         {
             // Fire and forget: the JS callback cannot await, and a failed reload is retried on the
             // next checkpoint anyway.
@@ -76,7 +76,7 @@ public sealed class BlazeDbTabSync : IAsyncDisposable
     /// <summary>
     /// Hand this to <see cref="BlazeDbDatabaseOptions.OnCheckpoint"/> on the writer tab.
     /// </summary>
-    public Action<ulong> PublishCheckpoint => generation => BlazeDbTabsInterop.Post(_channelName, generation);
+    public Action<ulong> PublishCheckpoint => generation => BlazeDbTabsInterop.Post(_handle, generation);
 
     /// <summary>Reloads the replica now, without waiting for the next checkpoint.</summary>
     public async ValueTask RefreshAsync()
@@ -147,7 +147,7 @@ public sealed class BlazeDbTabSync : IAsyncDisposable
         if (!_disposed)
         {
             _disposed = true;
-            BlazeDbTabsInterop.Close(_channelName);
+            BlazeDbTabsInterop.Close(_handle);
         }
         return default;
     }

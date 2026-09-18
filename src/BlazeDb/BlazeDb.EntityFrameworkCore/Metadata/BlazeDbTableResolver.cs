@@ -85,7 +85,7 @@ internal static class BlazeDbTableResolver
         {
             return null;
         }
-        var declared = ((dynamic)descriptor).KeyMember as string;
+        var declared = descriptor.KeyMember;
         return declared is null || declared == property.Name ? property.Name : null;
     }
 

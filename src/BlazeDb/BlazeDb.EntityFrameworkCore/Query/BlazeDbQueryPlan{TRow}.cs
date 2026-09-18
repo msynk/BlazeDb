@@ -75,15 +75,15 @@ internal sealed class BlazeDbQueryPlan<TRow> : BlazeDbQueryPlan
     }
 
     public override void AddPredicate(LambdaExpression predicate) =>
-        (_predicates ??= []).Add((Func<TRow, bool>)predicate.Compile());
+        (_predicates ??= []).Add((Func<TRow, bool>)BlazeDbDelegateCache.Compile(predicate));
 
     public override void AddOrdering(MethodCallExpression call)
     {
         // Reuse the LINQ-to-Objects operator that matches the Queryable one, with the same generic
         // arguments, rather than reconstructing the comparison ourselves - that keeps null and
         // comparer semantics identical to any other LINQ provider.
-        var selector = ((LambdaExpression)StripQuotes(call.Arguments[1])).Compile();
-        var method = EnumerableOperator(call.Method.Name, call.Method.GetGenericArguments());
+        var selector = BlazeDbDelegateCache.Compile((LambdaExpression)StripQuotes(call.Arguments[1]));
+        var method = BlazeDbDelegateCache.EnumerableOperator(call.Method.Name, call.Method.GetGenericArguments());
         var previous = _order;
 
         _order = previous is null
@@ -132,11 +132,6 @@ internal sealed class BlazeDbQueryPlan<TRow> : BlazeDbQueryPlan
         }
         return query;
     }
-
-    private static MethodInfo EnumerableOperator(string name, Type[] genericArguments) =>
-        typeof(Enumerable).GetMethods(BindingFlags.Public | BindingFlags.Static)
-            .First(m => m.Name == name && m.GetParameters().Length == 2 && m.IsGenericMethodDefinition)
-            .MakeGenericMethod(genericArguments);
 
     private static Expression StripQuotes(Expression expression)
     {

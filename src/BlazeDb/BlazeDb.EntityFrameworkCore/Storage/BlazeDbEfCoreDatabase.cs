@@ -40,7 +40,10 @@ internal sealed class BlazeDbEfCoreDatabase : IDatabase
         // database joins it - so a save made inside a transaction this context opened, or one the
         // application opened on the engine directly, becomes part of it instead of failing as a
         // nested one. It is still atomic; the boundary is just the outer scope's, which is what the
-        // caller asked for. A transaction another context opened is a different matter: joining it
+        // caller asked for - so a save that fails part-way inside an outer transaction leaves the
+        // entries it had already applied in that transaction, for the outer rollback to undo, exactly
+        // as a relational provider leaves the statements it had already executed. A transaction
+        // another context opened is a different matter: joining it
         // would report this save as done while leaving its fate to that context's commit or
         // rollback, with this tracker none the wiser. That is refused.
         var database = _tables.Database;
@@ -83,6 +86,23 @@ internal sealed class BlazeDbEfCoreDatabase : IDatabase
                 throw new DbUpdateConcurrencyException(
                     "The row was changed by another context after this one loaded it, so its original " +
                     "values no longer describe the database. Reload the entity and apply the change again.",
+                    ex, [entry]);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                // An update or delete of a row that is no longer there: someone else deleted it after
+                // this context loaded it. Relational providers report "0 rows affected" the same way.
+                throw new DbUpdateConcurrencyException(
+                    "The row this entity describes no longer exists in the database; another context " +
+                    "deleted it after this one loaded it.",
+                    ex, [entry]);
+            }
+            catch (Exception ex) when (ex is BlazeDbDuplicateKeyException or BlazeDbUniqueConstraintViolationException)
+            {
+                // Constraint violations are what DbUpdateException is for, and what callers catch;
+                // the engine's own exception stays available as InnerException.
+                throw new DbUpdateException(
+                    "Saving the entity violated a BlazeDb constraint. See the inner exception for details.",
                     ex, [entry]);
             }
             count++;

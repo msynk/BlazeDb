@@ -11,14 +11,16 @@ internal static partial class BlazeDbTabsInterop
 
     public static Task EnsureModuleAsync(string? moduleUrl) => BlazeDbBrowserModules.EnsureAsync(ModuleName, moduleUrl);
 
+    // handle identifies this channel object; several may share one channelName.
     [JSImport("open", ModuleName)]
-    public static partial void Open(string channelName, [JSMarshalAs<JSType.Function<JSType.Number>>] Action<double>? onMessage);
+    public static partial void Open(
+        string handle, string channelName, [JSMarshalAs<JSType.Function<JSType.Number>>] Action<double>? onMessage);
 
     [JSImport("post", ModuleName)]
-    public static partial void Post(string channelName, double generation);
+    public static partial void Post(string handle, double generation);
 
     [JSImport("close", ModuleName)]
-    public static partial void Close(string channelName);
+    public static partial void Close(string handle);
 
     [JSImport("isSupported", ModuleName)]
     public static partial bool IsSupported();

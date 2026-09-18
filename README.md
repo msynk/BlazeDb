@@ -110,6 +110,31 @@ dispose it when the database is closed - and `BlazeDbFileStorage.OpenReadOnly(di
 directory for a follower that only reads. `BlazeDbDatabase.DeleteAsync(storage)` removes a database
 from any backend.
 
+### Threading model
+
+BlazeDb is built for Blazor WebAssembly, which has one thread, and its guarantees are those of a
+**single logical writer with no concurrent readers**. Writes are serialized by a lock so the
+background flusher can snapshot consistently, but reads - `Get`, `Scan`, index lookups, every LINQ
+query through EF Core - take no lock at all, because on the platform the engine is designed for
+there is nothing to lock against. A read that overlaps a write on another thread is a data race on
+the underlying dictionaries and may throw or return garbage.
+
+That matters as soon as the engine leaves the browser. On ASP.NET Core or Blazor Server, `UseBlazeDb`
+shares one engine between every context of a type, and requests run on different threads; that is
+not a supported configuration unless the application serializes all access itself (one request at
+a time, or a lock around every query and save). The desktop file backend is for tools, tests and
+single-threaded hosts, not for a multi-threaded server.
+
+### Opening with part of the model
+
+A database may hold tables the current options do not register - a context type that owns some of
+a shared store's tables, or an application that has dropped a table type. Such tables are still
+opened: their rows are carried as raw bytes through recovery and written back out by every
+checkpoint, so nothing is lost, and `db.UnregisteredTables` names them. They cannot be queried until
+a descriptor for them is registered, which the EF Core provider does automatically when a context
+that knows the table shares the engine. Snapshots written by versions before this behavior (format 1)
+still open, but only with every table registered.
+
 Streaming a large result set without blocking the browser's only thread:
 
 ```csharp
@@ -133,6 +158,15 @@ var key = BlazeDbEncryptedStorage.DeriveKey(passphrase, salt);   // PBKDF2, work
 var cipher = await BlazeDbWebCryptoCipher.CreateAsync(key);      // BlazeDbAesGcmCipher on desktop
 var storage = new BlazeDbEncryptedStorage(await BlazeDbOpfsStorage.CreateAsync("mydb"), cipher, ownsCipher: true);
 ```
+
+What this does and does not protect: every frame is sealed with a fresh random 96-bit nonce and the
+file name as associated data, so contents cannot be read or altered without the key and a frame
+cannot be moved between files. It does not prevent *rollback* - someone with access to the files
+can put back an older, internally consistent manifest, snapshot and log - and there is no key
+rotation: to change the key, open the database, checkpoint, and write it out through a storage
+wrapped with the new cipher. Random nonces are safe for about 2^32 frames per key; at the default
+flush interval that is decades of continuous writing, but a long-lived database should rotate
+before then.
 
 ### Storage quota
 
@@ -190,8 +224,10 @@ A reload reads the whole generation - manifest, snapshot and log - before it tou
 and re-reads the manifest at the end. A checkpoint that lands halfway through is noticed and the
 read starts again; a reload that fails leaves the replica serving what it had.
 
-Where OPFS is unavailable (Firefox private windows, older Safari), swap in `BlazeDbIndexedDbStorage`,
-which has the same `CreateAsync` / `CreateReadOnlyAsync` pair:
+Where OPFS is unavailable or cannot be written from the main thread (Firefox private windows;
+Safari before 26, which can read OPFS but lacks `createWritable`), swap in `BlazeDbIndexedDbStorage`,
+which has the same `CreateAsync` / `CreateReadOnlyAsync` pair. `IsOpfsAvailableAsync` checks for
+the write API, not just the directory, so it says no on exactly those browsers:
 
 ```csharp
 IBlazeDbStorage storage = await BlazeDbIndexedDbStorage.IsOpfsAvailableAsync()
@@ -250,15 +286,24 @@ from anything EF does:
   memory immediately; `SaveChanges` is what commits it as one transaction and one WAL record, and
   what moves the secondary index entries onto the new values. Reading a value you have modified but
   not yet saved therefore gives you the modified one - from a query as well: while a tracked entity
-  of that type has unsaved changes, queries read the rows instead of the indexes so both agree.
+  of that type has unsaved changes in *any* live context on the engine, queries read the rows
+  instead of the indexes so both agree. (Contexts on one engine register with it for exactly this
+  purpose; the check costs a change-detection pass over the other contexts' trackers, paid only by
+  queries that would otherwise use an index.)
 - **`SaveChanges` is a memory operation.** It returns as soon as the transaction commits; the log
   reaches storage on the flush interval, or immediately if you call `context.Database.GetBlazeDb().FlushAsync()`.
+  A duplicate key or unique-index violation fails the save with `DbUpdateException` (the engine's
+  exception is the `InnerException`); the whole save is rolled back. When the save runs inside a
+  transaction you opened - `Database.BeginTransaction()` or one on the engine itself - it joins that
+  transaction, so a failure part-way leaves the entries already applied in it for your rollback to
+  undo, as with a relational provider.
 - **Two contexts on one store track the same objects.** Each keeps its own original values, so if
   both load a row and both save it, the second save describes a state the row has moved past and
-  fails with `DbUpdateConcurrencyException`; reload and retry, as with any provider. A save cannot
-  join a transaction another context has open. And after a rollback, the entities whose saves were
-  undone are detached - the objects still hold the undone values, and the next query loads the rows
-  as the database has them.
+  fails with `DbUpdateConcurrencyException`; reload and retry, as with any provider. Updating or
+  deleting a row another context has since deleted is a `DbUpdateConcurrencyException` too. A save
+  cannot join a transaction another context has open. And after a rollback, the entities whose
+  saves were undone are detached - the objects still hold the undone values, and the next query
+  loads the rows as the database actually has them.
 
 The model comes from the same attributes the engine uses: `[BlazeDbKey]` names the primary key whatever it
 is called, and `[BlazeDbIgnore]` keeps a property out of the entity type as well as out of the row bytes.
@@ -271,6 +316,14 @@ Everything else - projections, grouping, aggregates, joins between local sequenc
 Objects over the rows the plan returned, which costs nothing extra because those rows are already
 objects. The exception is `Include`: BlazeDb rows have no navigations, so relationships are modelled
 as key properties and queried against the other table directly.
+
+Because the provider replaces EF's query pipeline, it also replaces EF's compiled-query cache. The
+predicates and orderings a plan runs are compiled once per query *shape* and re-bound to the values
+each execution captures, so repeating a query does not compile anything; the expression walk that
+chooses the plan is repeated each time and is a few microseconds. Operators left to LINQ to Objects
+(a `Select`, a `GroupBy`) are evaluated by `System.Linq`'s own enumerable query provider, which does
+compile them per execution - keep the heavy lifting in the `Where`/`OrderBy`/`Skip`/`Take` prefix
+the plan absorbs when a query is hot.
 
 The demo site walks through all of this against a live database at `/efcore`.
 

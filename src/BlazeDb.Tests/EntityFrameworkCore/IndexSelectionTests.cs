@@ -337,6 +337,27 @@ public class IndexSelectionTests
     }
 
     [Fact]
+    public void Only_A_Lossless_Conversion_Of_The_Member_Is_Looked_Through()
+    {
+        var (test, context) = Open();
+        using var owned = test;
+        using var session = context;
+
+        test.People.Insert(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
+        test.People.Insert(new Person { Id = 2, Name = "Wrap", City = "Paris", Age = 36 + 256 });
+
+        // Widening the member is what the compiler does on its own and changes nothing.
+        var widened = PlanFor(test, context, context.People.Where(p => (long)p.Age == 36L));
+        Assert.Equal("Age", widened.IndexName);
+
+        // Narrowing it is a different predicate: 292 satisfies (byte)Age == 36 as well, and an index
+        // lookup for Age == 36 would have lost that row.
+        var narrowed = PlanFor(test, context, context.People.Where(p => (byte)p.Age == 36));
+        Assert.Null(narrowed.IndexName);
+        Assert.Equal([1, 2], context.People.Where(p => (byte)p.Age == 36).Select(p => p.Id).Order().ToList());
+    }
+
+    [Fact]
     public void An_Ordering_On_The_Range_Member_Sets_The_Direction_Instead_Of_Sorting()
     {
         var (test, context) = Open();

@@ -362,8 +362,13 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
     void IBlazeDbTableInternal.WriteSnapshot(BlazeDbBufferWriter writer, BlazeDbBufferWriter scratch)
     {
         writer.WriteVarUInt((ulong)_rows.Count);
-        foreach (var entry in _rows.Values)
+        foreach (var (key, entry) in _rows)
         {
+            // The key goes in front of the row, as in a WAL record, so a database opened without
+            // this table's descriptor can still carry the rows along (see BlazeDbOpaqueTable).
+            scratch.Reset();
+            Descriptor.KeyWriter(scratch, key);
+            writer.WriteBytes(scratch.WrittenSpan);
             scratch.Reset();
             Descriptor.RowWriter(scratch, entry.Row);
             writer.WriteBytes(scratch.WrittenSpan);
@@ -379,24 +384,17 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
         }
     }
 
-    void IBlazeDbTableInternal.LoadSnapshot(ref BlazeDbBufferReader reader)
+    void IBlazeDbTableInternal.LoadSnapshot(ref BlazeDbBufferReader reader, byte formatVersion)
     {
-        var count = checked((int)reader.ReadVarUInt());
-        if (count < 0)
-        {
-            throw new InvalidDataException($"Snapshot of table '{Name}' declares a negative row count.");
-        }
-        // Every row costs at least a length prefix, so a count larger than the bytes left cannot be
-        // honest. Checking before reserving capacity keeps a corrupt count an error rather than an
-        // out-of-memory kill; the loop below would have caught it, but only after the allocation.
-        if (count > reader.Remaining)
-        {
-            throw new InvalidDataException(
-                $"Snapshot of table '{Name}' declares {count} rows but only {reader.Remaining} bytes remain.");
-        }
+        var count = BlazeDbSnapshotFormat.ReadRowCount(ref reader, Name);
+        var keyed = formatVersion >= BlazeDbSnapshotFormat.KeyedRows;
         _rows.EnsureCapacity(count);
         for (var i = 0; i < count; i++)
         {
+            if (keyed)
+            {
+                reader.ReadBytes(); // The key is derived from the row here; it is stored for opaque tables.
+            }
             var rowBytes = reader.ReadBytes();
             var rowReader = new BlazeDbBufferReader(rowBytes);
             var row = Descriptor.RowReader(ref rowReader);

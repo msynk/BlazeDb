@@ -10,7 +10,8 @@ namespace BlazeDb.Wal;
 ///
 /// File layout (all referenced from an atomic manifest):
 ///   manifest.blz     magic BLZM, version, generation, snapshot file, wal file, snapshot LSN, CRC
-///   snapshot-N.blz   magic BLZS, version, LSN, per-table row dumps, CRC
+///   snapshot-N.blz   magic BLZS, version, LSN, per-table [key][row] dumps, CRC
+///                    (version 1 snapshots hold rows only and are still readable)
 ///   wal-N.blz        sequence of records: magic BLZR, [len:4][lsn:8][crc:4][payload]
 /// Recovery = load snapshot, then replay WAL records with LSN &gt; snapshot LSN, stopping at the
 /// first torn/corrupt record. The checksum covers the length and the LSN as well as the payload,
@@ -485,10 +486,23 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
             _walNeedsRepair = false; // The new generation's log is a fresh file with nothing to trim.
             _quotaPressureReported = false; // Compaction freed space; the next refusal is a new episode.
 
-            await _storage.DeleteAsync(oldWalFile, ct).ConfigureAwait(false);
-            if (oldSnapshotFile.Length > 0)
+            try
             {
-                await _storage.DeleteAsync(oldSnapshotFile, ct).ConfigureAwait(false);
+                await _storage.DeleteAsync(oldWalFile, ct).ConfigureAwait(false);
+                if (oldSnapshotFile.Length > 0)
+                {
+                    await _storage.DeleteAsync(oldSnapshotFile, ct).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not BlazeDbException)
+            {
+                // The checkpoint is in place - the manifest names the new generation - so this is
+                // a cleanup failure, not a checkpoint failure, and above all not a quota problem:
+                // the quota path swallows storage errors from a checkpoint it asked for and reports
+                // "out of space", which would be the wrong diagnosis here. The files it could not
+                // remove are unreferenced and harmless.
+                throw new BlazeDbException(
+                    $"Checkpoint {newGeneration} is durable, but the previous generation's files could not be deleted.", ex);
             }
 
             // Announced only once the new generation is durable and the old one is gone, so a
@@ -797,7 +811,7 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
     {
         var writer = new BlazeDbBufferWriter(64 * 1024);
         writer.WriteRaw(SnapshotMagic);
-        writer.WriteByte(FormatVersion);
+        writer.WriteByte(BlazeDbSnapshotFormat.Current);
         writer.WriteVarUInt((ulong)lsn);
         var tables = _db.TableList;
         writer.WriteVarUInt((ulong)tables.Count);
@@ -828,7 +842,7 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
             throw new BlazeDbCorruptDatabaseException($"Snapshot '{name}' failed checksum validation.");
         }
         var version = body.Slice(4)[0];
-        if (version != FormatVersion)
+        if (version is < BlazeDbSnapshotFormat.RowsOnly or > BlazeDbSnapshotFormat.Current)
         {
             throw new BlazeDbCorruptDatabaseException($"Unsupported snapshot format version {version}.");
         }
@@ -837,13 +851,13 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
     private void LoadSnapshot(byte[] bytes)
     {
         var reader = new BlazeDbBufferReader(bytes.AsSpan(4, bytes.Length - 4 - 4));
-        reader.ReadByte(); // format version; already checked by VerifySnapshot
+        var version = reader.ReadByte(); // already range-checked by VerifySnapshot
         reader.ReadVarUInt(); // snapshot LSN; authoritative value comes from the manifest
         var tableCount = checked((int)reader.ReadVarUInt());
         for (var i = 0; i < tableCount; i++)
         {
             var tableName = reader.ReadString();
-            _db.GetTableByName(tableName).LoadSnapshot(ref reader);
+            _db.GetTableByName(tableName).LoadSnapshot(ref reader, version);
         }
     }
 

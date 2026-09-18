@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace BlazeDb.EntityFrameworkCore.Metadata;
 
-internal sealed class BlazeDbTableCache : IBlazeDbTableCache
+internal sealed class BlazeDbTableCache : IBlazeDbTableCache, IDisposable
 {
     // Bindings are reflection-built and immutable, and a store outlives any one context, so
     // they are cached against the engine rather than rebuilt for every context instance.
@@ -16,15 +16,17 @@ internal sealed class BlazeDbTableCache : IBlazeDbTableCache
     private readonly IDbContextOptions _options;
     private readonly IModel _model;
     private readonly BlazeDbEngineCache _cache;
+    private readonly ICurrentDbContext _currentContext;
     private BlazeDbDatabase? _database;
     private int _version;
     private ConcurrentDictionary<IEntityType, IBlazeDbTableBinding>? _bindings;
 
-    public BlazeDbTableCache(IDbContextOptions options, IModel model, BlazeDbEngineCache cache)
+    public BlazeDbTableCache(IDbContextOptions options, IModel model, BlazeDbEngineCache cache, ICurrentDbContext currentContext)
     {
         _options = options;
         _model = model;
         _cache = cache;
+        _currentContext = currentContext;
     }
 
     public BlazeDbDatabase Database
@@ -44,9 +46,15 @@ internal sealed class BlazeDbTableCache : IBlazeDbTableCache
             _version = _cache.Version;
             _database = _cache.GetOrCreate(extension, _model, out _);
             _bindings = Bindings.GetOrCreateValue(_database);
+            // So indexed queries from other contexts on this engine can see this one's pending
+            // modifications; see BlazeDbContextRegistry.
+            BlazeDbContextRegistry.For(_database).Register(_currentContext.Context);
             return _database;
         }
     }
+
+    public bool OtherContextsHaveModified(Type clrType) =>
+        _database is { } database && BlazeDbContextRegistry.For(database).OthersHaveModified(clrType, _currentContext.Context);
 
     public IBlazeDbTableBinding GetBinding(IEntityType entityType)
     {
@@ -61,9 +69,16 @@ internal sealed class BlazeDbTableCache : IBlazeDbTableCache
 
     public void Reset()
     {
+        if (_database is { } database)
+        {
+            BlazeDbContextRegistry.For(database).Unregister(_currentContext.Context);
+        }
         _database = null;
         _bindings = null;
     }
+
+    /// <summary>The context's service scope is disposed with the context; leave the registry then.</summary>
+    public void Dispose() => Reset();
 
     private BlazeDbOptionsExtension Extension() =>
         _options.FindExtension<BlazeDbOptionsExtension>()

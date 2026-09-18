@@ -46,6 +46,122 @@ public class SharedStoreTests
     }
 
     [Fact]
+    public void Another_Contexts_Unsaved_Change_Is_Seen_By_Indexed_Queries_Too()
+    {
+        var options = IsolatedOptions();
+        using var seed = new PeopleContext(options);
+        seed.People.Add(Ada());
+        seed.SaveChanges();
+
+        using var a = new PeopleContext(options);
+        using var b = new PeopleContext(options);
+        var ada = a.People.Single();
+        ada.City = "Paris"; // Changed in memory by A; the City index still says London.
+
+        // B has nothing modified itself, so on its own it would trust the index and answer from
+        // London - returning an object that says Paris, and finding nothing under Paris.
+        Assert.Empty(b.People.Where(p => p.City == "London").ToList());
+        Assert.Same(ada, b.People.Single(p => p.City == "Paris"));
+        Assert.Same(ada, b.People.Single(p => p.City == "Paris" && p.Age == 36));
+        Assert.Equal(["Paris"], b.People.Where(p => p.City == "Paris").Select(p => p.City).ToList());
+
+        a.SaveChanges();
+        Assert.Same(ada, b.People.Single(p => p.City == "Paris"));
+        Assert.Empty(b.People.Where(p => p.City == "London").ToList());
+    }
+
+    [Fact]
+    public void A_Disposed_Context_No_Longer_Counts_As_Having_Pending_Changes()
+    {
+        var options = IsolatedOptions();
+        using var seed = new PeopleContext(options);
+        seed.People.Add(Ada());
+        seed.SaveChanges();
+
+        using var b = new PeopleContext(options);
+        using (var a = new PeopleContext(options))
+        {
+            a.People.Single().Name = "Ada Lovelace"; // Not an indexed property, and never saved.
+        }
+        // Whether or not the index is consulted, the answer is the same; this only has to not fail.
+        Assert.Single(b.People.Where(p => p.City == "London").ToList());
+    }
+
+    [Fact]
+    public void Constraint_Violations_Surface_As_DbUpdateException()
+    {
+        var options = IsolatedOptions();
+        using var seed = new PeopleContext(options);
+        seed.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36, Email = "ada@x" });
+        seed.SaveChanges();
+
+        using (var duplicateKey = new PeopleContext(options))
+        {
+            duplicateKey.People.Add(new Person { Id = 1, Name = "Again", City = "Paris", Age = 1 });
+            var ex = Assert.Throws<DbUpdateException>(() => duplicateKey.SaveChanges());
+            Assert.IsType<BlazeDbDuplicateKeyException>(ex.InnerException);
+            Assert.Single(ex.Entries);
+        }
+
+        using (var duplicateEmail = new PeopleContext(options))
+        {
+            duplicateEmail.People.Add(new Person { Id = 2, Name = "Grace", City = "NYC", Age = 45, Email = "ada@x" });
+            var ex = Assert.Throws<DbUpdateException>(() => duplicateEmail.SaveChanges());
+            Assert.IsType<BlazeDbUniqueConstraintViolationException>(ex.InnerException);
+        }
+
+        using var check = new PeopleContext(options);
+        Assert.Single(check.People.ToList());
+    }
+
+    [Fact]
+    public void Updating_A_Row_Another_Context_Deleted_Is_A_Concurrency_Error()
+    {
+        var options = IsolatedOptions();
+        using var seed = new PeopleContext(options);
+        seed.People.Add(Ada());
+        seed.SaveChanges();
+
+        using var a = new PeopleContext(options);
+        using var b = new PeopleContext(options);
+        var fromA = a.People.Single();
+        b.People.Remove(b.People.Single());
+        b.SaveChanges();
+
+        fromA.Name = "Ada Lovelace";
+        var ex = Assert.Throws<DbUpdateConcurrencyException>(() => a.SaveChanges());
+        Assert.IsType<KeyNotFoundException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task A_Context_That_Knows_Fewer_Tables_Can_Open_A_Store_Written_By_One_That_Knows_More()
+    {
+        // The rows of the table it does not know are carried, not dropped, and become visible the
+        // moment a context that does know it shares the engine.
+        var storage = new BlazeDbInMemoryStorage();
+        await using (var engine = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions { Storage = storage }
+                         .AddTable(Person.Table).AddTable(Order.Table)))
+        {
+            engine.GetTable(Person.Table).Insert(Ada());
+            engine.GetTable(Order.Table).Insert(new Order { Id = 10, PersonId = 1, Total = 9.5m });
+        }
+
+        var narrow = new DbContextOptionsBuilder<PeopleOnlyContext>().UseBlazeDb(storage).Options;
+        var wide = new DbContextOptionsBuilder<PeopleContext>().UseBlazeDb(storage).Options;
+
+        using var peopleOnly = new PeopleOnlyContext(narrow);
+        Assert.Equal("Ada", peopleOnly.People.Single().Name);
+        Assert.Equal(["orders"], peopleOnly.Database.GetBlazeDb().UnregisteredTables);
+
+        using var full = new PeopleContext(wide);
+        Assert.Same(peopleOnly.Database.GetBlazeDb(), full.Database.GetBlazeDb());
+        Assert.Equal(9.5m, full.Orders.Single(o => o.PersonId == 1).Total);
+        Assert.Empty(full.Database.GetBlazeDb().UnregisteredTables);
+
+        await full.Database.EnsureDeletedAsync();
+    }
+
+    [Fact]
     public void Indexed_Queries_Agree_With_The_Live_Object_Before_SaveChanges()
     {
         using var context = new PeopleContext(IsolatedOptions());

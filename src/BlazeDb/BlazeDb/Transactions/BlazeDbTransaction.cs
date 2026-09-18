@@ -19,11 +19,21 @@ public sealed class BlazeDbTransaction : IDisposable
 
     internal void Record(IBlazeDbTxnOp op) => _ops.Add(op);
 
+    /// <summary>
+    /// Commits the batch. If the commit cannot be journaled, every write is undone and the exception
+    /// propagates; either way the transaction is over, so disposing it afterwards does nothing.
+    /// </summary>
     public void Commit()
     {
         EnsureActive();
-        _db.CommitTransaction(this);
-        _completed = true;
+        try
+        {
+            _db.CommitTransaction(this);
+        }
+        finally
+        {
+            _completed = true;
+        }
     }
 
     public void Rollback()

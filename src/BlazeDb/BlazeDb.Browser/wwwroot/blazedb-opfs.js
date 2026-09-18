@@ -86,20 +86,41 @@ export function isLockHeld(lockName) {
 // frozen, and another tab may have taken over in the meantime. Ask the browser who holds each lock
 // now; where it is not us, try to take it back, and where that fails mark it lost so writes stop
 // instead of colliding with the new holder.
+//
+// The check needs navigator.locks.query() and the clientId recorded when the lock was taken;
+// without either there is no way to tell "still ours" from "someone else's", and guessing wrong in
+// the pessimistic direction is not harmless: dropping our own entry and re-requesting a lock this
+// document still holds fails (ifAvailable sees it taken - by us), which would mark a perfectly good
+// lock lost and leave it unreleasable for the life of the page. So a lock that cannot be checked
+// is left as it is.
 async function revalidateLocks() {
-  if (!navigator.locks || heldLocks.size === 0) {
+  if (!navigator.locks || !navigator.locks.query || heldLocks.size === 0) {
     return;
   }
   for (const [lockName, entry] of [...heldLocks]) {
-    const holder = await holderOf(lockName);
-    if (holder !== null && entry.clientId !== null && holder === entry.clientId) {
+    if (entry.clientId === null) {
+      continue; // Taken without an id to compare against; cannot be checked, so not second-guessed.
+    }
+    let state;
+    try {
+      state = await navigator.locks.query();
+    } catch {
+      continue; // The browser would not say; same as above.
+    }
+    const held = state.held.find((l) => l.name === lockName);
+    if (held && held.clientId === entry.clientId) {
       continue; // Still ours.
     }
-    if (holder === null) {
-      // Nobody holds it: the browser let go of ours. Take it again.
+    if (!held) {
+      // Nobody holds it: the browser let go of ours. Take it again, and only give the old entry
+      // up once the new one is in place.
+      const previous = heldLocks.get(lockName);
       heldLocks.delete(lockName);
       if (await requestLock(lockName)) {
         continue;
+      }
+      if (previous) {
+        heldLocks.set(lockName, previous);
       }
     }
     lostLocks.add(lockName);
@@ -117,7 +138,21 @@ if (typeof window !== "undefined") {
   });
 }
 
+// Whether this context can write OPFS files. createWritable() is the only write API available on
+// the main thread and is newer than the rest of OPFS (Safari gained it in version 26), so a
+// writer has to check for it up front rather than discover its absence on the first flush.
+export function canWrite() {
+  return typeof FileSystemFileHandle !== "undefined" &&
+    typeof FileSystemFileHandle.prototype.createWritable === "function";
+}
+
 export async function openDatabaseDirectory(databaseName) {
+  if (!canWrite()) {
+    throw new Error(
+      "This browser can read the Origin Private File System but cannot write to it from the main " +
+      "thread (FileSystemFileHandle.createWritable is missing). Use BlazeDbIndexedDbStorage instead; " +
+      "BlazeDbIndexedDbStorage.IsOpfsAvailableAsync() reports this.");
+  }
   const root = await navigator.storage.getDirectory();
   return await root.getDirectoryHandle(databaseName, { create: true });
 }

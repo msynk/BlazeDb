@@ -38,9 +38,10 @@ internal sealed class BlazeDbQueryExecutor
             // memory - the provider's contract - but its index entries still describe the old
             // values until SaveChanges moves them. A lookup through those entries would then miss
             // the row under its new value and return it under the one it no longer has, while a scan
-            // sees the object as it is. So while such changes are pending, the query reads the rows
-            // themselves; the predicates stay as filters and the ordering is done by sorting. (The
-            // primary key cannot be changed in place, so a key lookup stays exact.)
+            // sees the object as it is. So while such changes are pending - in this context or in
+            // any other context on the same engine, since they all share the rows - the query reads
+            // the rows themselves; the predicates stay as filters and the ordering is done by
+            // sorting. (The primary key cannot be changed in place, so a key lookup stays exact.)
             translated = BlazeDbQueryTranslator.Translate(query, binding, entityType.ClrType, useIndexes: false);
         }
 
@@ -81,7 +82,7 @@ internal sealed class BlazeDbQueryExecutor
     /// Only consulted once a plan has actually chosen an index, so the detect-changes pass it costs
     /// is paid for the queries that need it.
     /// </summary>
-    private static bool HasUnsavedChangesTo(IEntityType entityType, DbContext context)
+    private bool HasUnsavedChangesTo(IEntityType entityType, DbContext context)
     {
         foreach (var entry in context.ChangeTracker.Entries())
         {
@@ -90,7 +91,7 @@ internal sealed class BlazeDbQueryExecutor
                 return true;
             }
         }
-        return false;
+        return _tables.OtherContextsHaveModified(entityType.ClrType);
     }
 
     /// <summary>

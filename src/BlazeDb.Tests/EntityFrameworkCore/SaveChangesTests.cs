@@ -186,7 +186,9 @@ public class SaveChangesTests
         context.Orders.Add(new Order { Id = 10, PersonId = 1, Total = 42m });
         context.People.Add(new Person { Id = 2, Name = "Grace", City = "NY", Age = 45, Email = "ada@example.com" });
 
-        Assert.Throws<BlazeDbUniqueConstraintViolationException>(() => context.SaveChanges());
+        // Reported the way EF callers expect, with the engine's own exception underneath.
+        var ex = Assert.Throws<DbUpdateException>(() => context.SaveChanges());
+        Assert.IsType<BlazeDbUniqueConstraintViolationException>(ex.InnerException);
 
         // The order was applied before the conflicting person, so the rollback has to undo it.
         Assert.Null(test.Orders.Get(10));

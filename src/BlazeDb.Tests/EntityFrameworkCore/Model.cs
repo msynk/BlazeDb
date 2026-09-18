@@ -55,6 +55,16 @@ public sealed class PeopleContext : DbContext
     public DbSet<Tag> Tags => Set<Tag>();
 }
 
+/// <summary>A context that knows only part of the store, for sharing it with <see cref="PeopleContext"/>.</summary>
+public sealed class PeopleOnlyContext : DbContext
+{
+    public PeopleOnlyContext(DbContextOptions<PeopleOnlyContext> options) : base(options)
+    {
+    }
+
+    public DbSet<Person> People => Set<Person>();
+}
+
 public enum TagKind : byte
 {
     Topic,

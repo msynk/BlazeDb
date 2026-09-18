@@ -113,10 +113,18 @@ export function closeDatabase(db) {
   db.close();
 }
 
-// True when the Origin Private File System is usable, so callers can pick a backend.
+// True when the Origin Private File System is usable *for writing* from this context, so callers
+// can pick a backend. Reading (getDirectory, getFile) has been in every engine for years; the
+// main-thread write API, FileSystemFileHandle.createWritable(), arrived much later (Safari 26).
+// A browser that can read OPFS but not write to it would open the database and then fail every
+// flush, so the probe asks about the write API, not just the directory.
 export async function isOpfsAvailable() {
   try {
     if (!navigator.storage || !navigator.storage.getDirectory) {
+      return false;
+    }
+    if (typeof FileSystemFileHandle === "undefined" ||
+        typeof FileSystemFileHandle.prototype.createWritable !== "function") {
       return false;
     }
     await navigator.storage.getDirectory();

@@ -7,9 +7,10 @@ namespace BlazeDb;
 /// A memory-first database instance. All live data resides in managed memory; reads never touch
 /// storage. Writes are applied to memory synchronously and (when a storage backend is
 /// configured) appended to a write-ahead log flushed in the background.
-/// The engine assumes a single logical writer (Blazor WASM's single-threaded model); mutations
-/// and snapshot serialization are briefly locked so the background flusher stays consistent on
-/// multi-threaded hosts.
+/// The engine assumes a single logical writer and no concurrent readers (Blazor WASM's
+/// single-threaded model); mutations and snapshot serialization are briefly locked so the
+/// background flusher stays consistent, but reads take no lock and must not overlap a write on
+/// another thread. A multi-threaded host has to serialize all access itself.
 /// </summary>
 public sealed class BlazeDbDatabase : IAsyncDisposable
 {
@@ -108,24 +109,42 @@ public sealed class BlazeDbDatabase : IAsyncDisposable
 
     /// <summary>
     /// Adds <paramref name="descriptor"/> if it is not already present. Used by the EF Core provider
-    /// when a second context type shares an already-open store and brings extra entity types.
+    /// when a second context type shares an already-open store and brings extra entity types. If
+    /// recovery carried rows for a table of this name that no descriptor claimed at the time (see
+    /// <see cref="BlazeDbOpaqueTable"/>), they are decoded into the new table here.
     /// </summary>
     internal void EnsureTable(BlazeDbTableDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         CheckDisposed();
-        if (_tablesByDescriptor.ContainsKey(descriptor))
+        lock (SyncRoot)
         {
-            return;
-        }
+            if (_tablesByDescriptor.ContainsKey(descriptor))
+            {
+                return;
+            }
 
-        var table = descriptor.CreateTable(this);
-        if (!_tablesByName.TryAdd(table.Name, table))
-        {
-            throw new BlazeDbException($"Duplicate table name '{table.Name}'.");
+            var table = descriptor.CreateTable(this);
+            if (_tablesByName.TryGetValue(table.Name, out var existing))
+            {
+                if (existing is not BlazeDbOpaqueTable opaque)
+                {
+                    throw new BlazeDbException($"Duplicate table name '{table.Name}'.");
+                }
+                foreach (var (key, row) in opaque.Rows)
+                {
+                    table.ReplaySet(key, row);
+                }
+                _tablesByName[table.Name] = table;
+                _tableList[_tableList.IndexOf(opaque)] = table;
+            }
+            else
+            {
+                _tablesByName.Add(table.Name, table);
+                _tableList.Add(table);
+            }
+            _tablesByDescriptor.Add(descriptor, table);
         }
-        _tablesByDescriptor.Add(descriptor, table);
-        _tableList.Add(table);
     }
 
     /// <summary>
@@ -217,11 +236,38 @@ public sealed class BlazeDbDatabase : IAsyncDisposable
 
     internal List<IBlazeDbTableInternal> TableList => _tableList;
 
-    internal IBlazeDbTableInternal GetTableByName(string name) =>
-        _tablesByName.TryGetValue(name, out var table)
-            ? table
-            : throw new BlazeDbException(
-                $"Persisted data references table '{name}', which is not registered in BlazeDbDatabaseOptions.");
+    /// <summary>
+    /// The table persisted data refers to. A name no descriptor claims is not an error: the rows are
+    /// carried as raw bytes (<see cref="BlazeDbOpaqueTable"/>) so a database opened with part of its
+    /// model - or after a table type was removed - still opens, and every checkpoint writes those rows
+    /// back out. Called under <see cref="SyncRoot"/> by recovery and replay.
+    /// </summary>
+    internal IBlazeDbTableInternal GetTableByName(string name)
+    {
+        if (!_tablesByName.TryGetValue(name, out var table))
+        {
+            table = new BlazeDbOpaqueTable(name);
+            _tablesByName.Add(name, table);
+            _tableList.Add(table);
+        }
+        return table;
+    }
+
+    /// <summary>
+    /// Names of tables the persisted data holds rows for but no registered descriptor describes.
+    /// Their rows are preserved across checkpoints but cannot be queried until a descriptor for
+    /// them is registered on a later open.
+    /// </summary>
+    public IReadOnlyList<string> UnregisteredTables
+    {
+        get
+        {
+            lock (SyncRoot)
+            {
+                return _tableList.OfType<BlazeDbOpaqueTable>().Select(t => t.Name).ToArray();
+            }
+        }
+    }
 
     internal long NextSeq() => ++_nextSeq;
 
@@ -285,12 +331,26 @@ public sealed class BlazeDbDatabase : IAsyncDisposable
         VerifyActive(transaction);
         lock (SyncRoot)
         {
-            if (transaction.Ops.Count > 0)
+            try
             {
-                _wal?.AppendCommit(transaction.Ops);
+                if (transaction.Ops.Count > 0)
+                {
+                    _wal?.AppendCommit(transaction.Ops);
+                }
             }
-            _activeTransaction = null;
-            ActiveTransactionOwner = null;
+            catch
+            {
+                // Memory must never run ahead of what the log will replay, exactly as for an
+                // autocommit write: a batch that could not be journaled is undone here and now,
+                // and the transaction ends, rather than staying applied until someone disposes it.
+                RevertOps(transaction.Ops);
+                throw;
+            }
+            finally
+            {
+                _activeTransaction = null;
+                ActiveTransactionOwner = null;
+            }
         }
     }
 
@@ -299,13 +359,17 @@ public sealed class BlazeDbDatabase : IAsyncDisposable
         VerifyActive(transaction);
         lock (SyncRoot)
         {
-            var ops = transaction.Ops;
-            for (var i = ops.Count - 1; i >= 0; i--)
-            {
-                ops[i].Revert();
-            }
+            RevertOps(transaction.Ops);
             _activeTransaction = null;
             ActiveTransactionOwner = null;
+        }
+    }
+
+    private static void RevertOps(IReadOnlyList<IBlazeDbTxnOp> ops)
+    {
+        for (var i = ops.Count - 1; i >= 0; i--)
+        {
+            ops[i].Revert();
         }
     }
 

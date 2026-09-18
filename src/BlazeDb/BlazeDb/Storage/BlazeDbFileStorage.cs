@@ -72,7 +72,22 @@ public sealed class BlazeDbFileStorage : IBlazeDbEnumerableStorage, IDisposable
         {
             return null;
         }
-        return await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Sharing write and delete access is what lets a replica read while the writer has the
+            // log open for an append or is swapping a new manifest in with File.Replace; the default
+            // FileShare.Read of File.ReadAllBytes would make those moments a transient IOException.
+            await using var stream = new FileStream(
+                path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, bufferSize: 1,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var bytes = new byte[stream.Length];
+            await stream.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
+            return bytes;
+        }
+        catch (FileNotFoundException)
+        {
+            return null; // Deleted between the existence check and the open.
+        }
     }
 
     public async ValueTask WriteAtomicAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
