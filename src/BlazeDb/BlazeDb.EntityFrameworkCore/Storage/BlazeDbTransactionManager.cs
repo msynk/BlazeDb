@@ -1,36 +1,64 @@
+using BlazeDb.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BlazeDb.EntityFrameworkCore.Storage;
 
 /// <summary>
-/// BlazeDb has one ambient transaction at a time, opened at <c>SaveChanges</c>. An explicit
-/// <c>BeginTransaction</c> spanning several saves is not supported, matching the engine's
-/// single-writer, no-nesting model.
+/// Maps <c>Database.BeginTransaction</c> onto the engine's single ambient transaction. Saves made
+/// inside that scope join it rather than opening a nested one.
 /// </summary>
-public sealed class BlazeDbTransactionManager : IDbContextTransactionManager
+internal sealed class BlazeDbTransactionManager : IDbContextTransactionManager
 {
-    public IDbContextTransaction? CurrentTransaction => null;
+    private readonly IBlazeDbTableCache _tables;
+    private BlazeDbEfTransaction? _current;
 
-    public IDbContextTransaction BeginTransaction() => throw NotSupported();
+    public BlazeDbTransactionManager(IBlazeDbTableCache tables) => _tables = tables;
 
-    public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
-        throw NotSupported();
+    public IDbContextTransaction? CurrentTransaction => _current;
 
-    public void CommitTransaction() => throw NotSupported();
+    public IDbContextTransaction BeginTransaction()
+    {
+        if (_current is not null)
+        {
+            throw new InvalidOperationException("A transaction is already in progress on this context.");
+        }
 
-    public Task CommitTransactionAsync(CancellationToken cancellationToken = default) => throw NotSupported();
+        var transaction = _tables.Database.BeginTransaction();
+        _current = new BlazeDbEfTransaction(transaction, () => _current = null);
+        return _current;
+    }
 
-    public void RollbackTransaction() => throw NotSupported();
+    public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled<IDbContextTransaction>(cancellationToken);
+        }
+        return Task.FromResult(BeginTransaction());
+    }
 
-    public Task RollbackTransactionAsync(CancellationToken cancellationToken = default) => throw NotSupported();
+    public void CommitTransaction() => CurrentOrThrow().Commit();
+
+    public Task CommitTransactionAsync(CancellationToken cancellationToken = default) =>
+        CurrentOrThrow().CommitAsync(cancellationToken);
+
+    public void RollbackTransaction() => CurrentOrThrow().Rollback();
+
+    public Task RollbackTransactionAsync(CancellationToken cancellationToken = default) =>
+        CurrentOrThrow().RollbackAsync(cancellationToken);
 
     public void ResetState()
     {
+        _current?.Dispose();
+        _current = null;
     }
 
-    public Task ResetStateAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task ResetStateAsync(CancellationToken cancellationToken = default)
+    {
+        ResetState();
+        return Task.CompletedTask;
+    }
 
-    private static NotSupportedException NotSupported() =>
-        new("BlazeDb does not support transactions spanning several SaveChanges calls. " +
-            "Each SaveChanges is already atomic: it commits as one engine transaction and one WAL record.");
+    private BlazeDbEfTransaction CurrentOrThrow() =>
+        _current ?? throw new InvalidOperationException("No transaction is in progress on this context.");
 }

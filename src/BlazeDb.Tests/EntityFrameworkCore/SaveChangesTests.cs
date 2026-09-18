@@ -1,4 +1,6 @@
+using BlazeDb.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Xunit;
 
 namespace BlazeDb.EntityFrameworkCore.Tests;
@@ -215,29 +217,19 @@ public class SaveChangesTests
     public async Task Changes_Survive_A_Reopen()
     {
         var storage = new BlazeDb.Storage.BlazeDbInMemoryStorage();
-        var database = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
-        {
-            Storage = storage,
-            FlushInterval = TimeSpan.FromHours(1),
-        }.AddTable(Person.Table).AddTable(Order.Table));
+        var options = new DbContextOptionsBuilder<PeopleContext>()
+            .UseBlazeDb(storage, o => o.FlushInterval = TimeSpan.FromHours(1))
+            .Options;
 
-        using (var context = new PeopleContext(
-                   new DbContextOptionsBuilder<PeopleContext>().UseBlazeDb(database).Options))
+        using (var context = new PeopleContext(options))
         {
             context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
             context.SaveChanges();
+            await context.Database.GetBlazeDb().FlushAsync();
+            await context.Database.GetService<BlazeDbEngineCache>().ReleaseAsync(storage);
         }
-        await database.FlushAsync();
-        await database.DisposeAsync();
 
-        await using var reopened = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
-        {
-            Storage = storage,
-            FlushInterval = TimeSpan.FromHours(1),
-        }.AddTable(Person.Table).AddTable(Order.Table));
-
-        using var fresh = new PeopleContext(
-            new DbContextOptionsBuilder<PeopleContext>().UseBlazeDb(reopened).Options);
+        using var fresh = new PeopleContext(options);
         Assert.Equal("Ada", fresh.People.Single().Name);
     }
 }

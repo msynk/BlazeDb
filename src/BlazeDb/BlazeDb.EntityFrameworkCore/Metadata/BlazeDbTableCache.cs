@@ -8,19 +8,19 @@ namespace BlazeDb.EntityFrameworkCore.Metadata;
 
 internal sealed class BlazeDbTableCache : IBlazeDbTableCache
 {
-    // Bindings are reflection-built and immutable, and a database outlives any one context, so
-    // they are cached against the database rather than rebuilt for every context instance. The
-    // weak table lets a closed database and its bindings be collected together.
+    // Bindings are reflection-built and immutable, and a store outlives any one context, so
+    // they are cached against the engine rather than rebuilt for every context instance.
     private static readonly ConditionalWeakTable<BlazeDbDatabase, ConcurrentDictionary<IEntityType, IBlazeDbTableBinding>>
         Bindings = new();
 
     private readonly ConcurrentDictionary<IEntityType, IBlazeDbTableBinding> _bindings;
 
-    public BlazeDbTableCache(IDbContextOptions options)
+    public BlazeDbTableCache(IDbContextOptions options, IModel model, BlazeDbEngineCache cache)
     {
-        Database = options.FindExtension<BlazeDbOptionsExtension>()?.Database
-            ?? throw new InvalidOperationException(
-                "No BlazeDb database was configured. Call optionsBuilder.UseBlazeDb(database).");
+        var extension = options.FindExtension<BlazeDbOptionsExtension>()
+                        ?? throw new InvalidOperationException(
+                            "No BlazeDb store was configured. Call optionsBuilder.UseBlazeDb().");
+        Database = cache.GetOrCreate(extension, model);
         _bindings = Bindings.GetOrCreateValue(Database);
     }
 

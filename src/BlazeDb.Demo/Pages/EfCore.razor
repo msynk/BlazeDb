@@ -1,27 +1,27 @@
 @page "/efcore"
-@implements IAsyncDisposable
 @inject DemoDbService Db
 
 <PageTitle>EF Core - BlazeDb</PageTitle>
 
 <PageHeader Eyebrow="Engine" IconName="layers" Title="The same engine, reached through LINQ"
-            Lead="The EF Core provider is a translation layer, not a second database. UseBlazeDb points a DbContext at an open BlazeDbDatabase; LINQ becomes a query plan; SaveChanges is one engine transaction. The rows you get back are the objects the table already holds.">
+            Lead="The EF Core provider is a translation layer, not a second database. AddDbContext and UseBlazeDb are the whole setup: tables come from your DbSets, LINQ becomes a query plan, and SaveChanges is one engine transaction. The rows you get back are the objects the table already holds.">
     <span class="chip"><Icon Name="bolt" /> No SQL, no materialisation</span>
     <span class="chip"><Icon Name="txn" /> SaveChanges is a memory commit</span>
     <span class="chip"><Icon Name="close" /> No Include, no navigations</span>
 </PageHeader>
 
-<Section Title="Point a context at an open database" IconName="code"
-         Lead="The application owns the engine instance. Contexts come and go against it, which is how a Blazor app is supposed to use this provider: one writer, many short-lived contexts.">
+<Section Title="The usual EF Core setup" IconName="code"
+         Lead="A DbContext, a UseBlazeDb call, and AddDbContext (or OnConfiguring). There is no OpenAsync and no AddTable: entity types on the context are the model.">
     <div class="grid grid-2">
         <CodeBlock Title="AppContext.cs" Code="@ContextSnippet" />
-        <CodeBlock Title="Startup" Code="@UseSnippet" />
+        <CodeBlock Title="Program.cs" Code="@UseSnippet" />
     </div>
     <Callout Tone="accent" Title="The model is the [BlazeDbTable] type.">
         The source generator's descriptor is what the provider binds to. <code>[BlazeDbKey]</code>
         is the primary key whatever it is called, and <code>[BlazeDbIgnore]</code> keeps a property
         out of the entity type as well as out of the row bytes. Hand-written descriptors use
-        <code>entity.UseBlazeDbTable(descriptor)</code>.
+        <code>entity.UseBlazeDbTable(descriptor)</code>. Persistence is <code>UseBlazeDb(storage)</code>,
+        the same slot a connection string occupies on a relational provider.
     </Callout>
 </Section>
 
@@ -333,8 +333,6 @@ else
     private readonly ScenarioLog _log = new();
     private string? _includeError;
 
-    private BlazeDbDatabase? _sandbox;
-
     private TrackScenario? CurrentTrack =>
         _trackKind is { } kind ? TrackScenarios.First(s => s.Kind == kind) : null;
 
@@ -347,8 +345,20 @@ else
         }
     }
 
-    private static DemoDbContext CreateContext(BlazeDbDatabase database) =>
-        new(new DbContextOptionsBuilder<DemoDbContext>().UseBlazeDb(database).Options);
+    private static DemoDbContext CreateContext(BlazeDbDatabase? database = null)
+    {
+        var builder = new DbContextOptionsBuilder<DemoDbContext>();
+        if (database is not null)
+        {
+            builder.UseBlazeDb(database);
+        }
+        else
+        {
+            builder.UseBlazeDb("ef-demo-" + Guid.NewGuid().ToString("N"));
+        }
+
+        return new DemoDbContext(builder.Options);
+    }
 
     private void RunSample(QueryKind kind)
     {
@@ -485,28 +495,27 @@ else
         }
     }
 
-    private async Task RunTrackAsync(TrackKind kind)
+    private Task RunTrackAsync(TrackKind kind)
     {
         _trackKind = kind;
         _running = true;
         _log.Clear();
-        await DisposeSandboxAsync();
 
         try
         {
-            _sandbox = await DemoSandbox.OpenAsync(new BlazeDbInMemoryStorage(), TimeSpan.FromHours(1), long.MaxValue);
-            var todos = _sandbox.GetTable(TodoEntry.Table);
-            todos.Insert(Row("Design the WAL record layout", category: "engine"));
-            todos.Insert(Row("Wire OPFS handles", done: true, category: "browser"));
-            todos.Insert(Row("Write the getting-started guide", category: "docs"));
-            _sandbox.GetTable(Setting.Table).Upsert(new Setting
+            using var context = CreateContext();
+            context.Todos.Add(Row("Design the WAL record layout", category: "engine"));
+            context.Todos.Add(Row("Wire OPFS handles", done: true, category: "browser"));
+            context.Todos.Add(Row("Write the getting-started guide", category: "docs"));
+            context.Settings.Add(new Setting
             {
                 Name = "theme",
                 Value = "dark",
                 UpdatedAt = DateTime.UtcNow,
             });
+            context.SaveChanges();
 
-            using var context = CreateContext(_sandbox);
+            var todos = context.Database.GetBlazeDb().GetTable(TodoEntry.Table);
             switch (kind)
             {
                 case TrackKind.LiveRow:
@@ -536,6 +545,8 @@ else
         {
             _running = false;
         }
+
+        return Task.CompletedTask;
     }
 
     private void TrackLiveRow(DemoDbContext context, BlazeDbTable<Guid, TodoEntry> todos)
@@ -655,17 +666,6 @@ else
         Effort = 40,
     };
 
-    private async Task DisposeSandboxAsync()
-    {
-        if (_sandbox is not null)
-        {
-            await _sandbox.DisposeAsync();
-            _sandbox = null;
-        }
-    }
-
-    public async ValueTask DisposeAsync() => await DisposeSandboxAsync();
-
     private const string ContextSnippet = """
         public sealed class AppContext(DbContextOptions<AppContext> options) : DbContext(options)
         {
@@ -674,14 +674,9 @@ else
         """;
 
     private const string UseSnippet = """
-        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
-        {
-            Storage = await BlazeDbOpfsStorage.CreateAsync("mydb"),
-        }.AddTable(TodoItem.Table));
-
-        var context = new AppContext(new DbContextOptionsBuilder<AppContext>()
-            .UseBlazeDb(db)
-            .Options);
+        builder.Services.AddDbContext<AppContext>(options =>
+            options.UseBlazeDb());          // in-memory
+            // options.UseBlazeDb(storage); // OPFS, files, …
 
         var open = context.Todos
             .Where(t => !t.Done)

@@ -3,30 +3,33 @@ using Microsoft.EntityFrameworkCore;
 namespace BlazeDb.EntityFrameworkCore.Tests;
 
 /// <summary>
-/// Opens an in-memory-only engine and a context over it. The database is the long-lived thing -
-/// it holds the data and the writer lock - and contexts come and go against it, which is how the
-/// provider is meant to be used in a Blazor app.
+/// A private in-memory store and contexts over it. Tables come from <see cref="PeopleContext"/>'s
+/// model; nothing is registered with <c>AddTable</c>.
 /// </summary>
 internal sealed class TestDatabase : IAsyncDisposable
 {
-    private TestDatabase(BlazeDbDatabase database) => Database = database;
+    private TestDatabase(DbContextOptions<PeopleContext> options, BlazeDbDatabase database)
+    {
+        Options = options;
+        Database = database;
+    }
+
+    public DbContextOptions<PeopleContext> Options { get; }
 
     public BlazeDbDatabase Database { get; }
 
-    public static async Task<TestDatabase> OpenAsync()
+    public static TestDatabase Open()
     {
-        var database = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
-            {
-                FlushInterval = TimeSpan.FromHours(1),
-            }
-            .AddTable(Person.Table)
-            .AddTable(Order.Table)
-            .AddTable(Tag.Table));
-        return new TestDatabase(database);
+        var options = new DbContextOptionsBuilder<PeopleContext>()
+            .UseBlazeDb("test-" + Guid.NewGuid().ToString("N"))
+            .Options;
+        using var context = new PeopleContext(options);
+        return new TestDatabase(options, context.Database.GetBlazeDb());
     }
 
-    public PeopleContext CreateContext() =>
-        new(new DbContextOptionsBuilder<PeopleContext>().UseBlazeDb(Database).Options);
+    public static Task<TestDatabase> OpenAsync() => Task.FromResult(Open());
+
+    public PeopleContext CreateContext() => new(Options);
 
     public BlazeDbTable<int, Person> People => Database.GetTable(Person.Table);
 
@@ -34,5 +37,9 @@ internal sealed class TestDatabase : IAsyncDisposable
 
     public BlazeDbTable<string, Tag> Tags => Database.GetTable(Tag.Table);
 
-    public ValueTask DisposeAsync() => Database.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        using var context = CreateContext();
+        await context.Database.EnsureDeletedAsync();
+    }
 }

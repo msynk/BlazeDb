@@ -96,6 +96,28 @@ public sealed class BlazeDbDatabase : IAsyncDisposable
     }
 
     /// <summary>
+    /// Adds <paramref name="descriptor"/> if it is not already present. Used by the EF Core provider
+    /// when a second context type shares an already-open store and brings extra entity types.
+    /// </summary>
+    internal void EnsureTable(BlazeDbTableDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        CheckDisposed();
+        if (_tablesByDescriptor.ContainsKey(descriptor))
+        {
+            return;
+        }
+
+        var table = descriptor.CreateTable(this);
+        if (!_tablesByName.TryAdd(table.Name, table))
+        {
+            throw new BlazeDbException($"Duplicate table name '{table.Name}'.");
+        }
+        _tablesByDescriptor.Add(descriptor, table);
+        _tableList.Add(table);
+    }
+
+    /// <summary>
     /// Starts an explicit transaction. Only one can be active at a time (single-writer model);
     /// while active, every table write on this database becomes part of it.
     /// </summary>

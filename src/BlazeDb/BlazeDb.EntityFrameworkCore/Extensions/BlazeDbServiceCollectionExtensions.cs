@@ -37,7 +37,11 @@ public static class BlazeDbServiceCollectionExtensions
             .TryAdd<IProviderConventionSetBuilder, BlazeDbConventionSetBuilder>()
             .TryAdd<ITypeMappingSource, BlazeDbTypeMappingSource>()
             .TryAdd<IValueGeneratorSelector, ValueGeneratorSelector>()
-            .TryAddProviderSpecificServices(b => b.TryAddScoped<IBlazeDbTableCache, BlazeDbTableCache>())
+            .TryAddProviderSpecificServices(b =>
+            {
+                b.TryAddSingleton<BlazeDbEngineCache, BlazeDbEngineCache>();
+                b.TryAddScoped<IBlazeDbTableCache, BlazeDbTableCache>();
+            })
             .TryAddCoreServices();
 
         return serviceCollection;

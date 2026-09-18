@@ -22,7 +22,7 @@ public static class SiteMap
             "Compose an index source, residual filters, ordering and paging without a query language."),
 
         new("efcore", "EF Core", "layers", "Engine",
-            "UseBlazeDb, LINQ over live rows, SaveChanges as one transaction, and what the translator absorbs."),
+            "UseBlazeDb, AddDbContext, LINQ over live rows, and SaveChanges as one transaction."),
 
         new("transactions", "Transactions", "txn", "Engine",
             "Ambient batches, atomic commit, rollback semantics and the single-writer rule."),

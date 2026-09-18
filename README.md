@@ -170,7 +170,7 @@ IBlazeDbStorage storage = await BlazeDbIndexedDbStorage.IsOpfsAvailableAsync()
 ## EF Core
 
 The provider maps entity types onto the same `[BlazeDbTable]` types the engine uses - the descriptor the
-source generator emits is the model - and needs no configuration beyond the database itself:
+source generator emits is the model - and is configured the same way as any other EF Core provider:
 
 ```csharp
 public sealed class AppContext(DbContextOptions<AppContext> options) : DbContext(options)
@@ -178,13 +178,30 @@ public sealed class AppContext(DbContextOptions<AppContext> options) : DbContext
     public DbSet<TodoItem> Todos => Set<TodoItem>();
 }
 
-var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions { ... }.AddTable(TodoItem.Table));
-var context = new AppContext(new DbContextOptionsBuilder<AppContext>().UseBlazeDb(db).Options);
+builder.Services.AddDbContext<AppContext>(options =>
+    options.UseBlazeDb());                 // in-memory
+    // options.UseBlazeDb(storage);        // OPFS, files, encrypted storage, …
 
 var open = context.Todos.Where(t => !t.Done).OrderBy(t => t.CreatedAt).Take(20).ToList();
 open[0].Done = true;
 context.SaveChanges();
 ```
+
+`UseBlazeDb()` with no arguments names the store after the context type, so every `AppContext`
+shares one engine. Pass a string to choose the name (`UseInMemoryDatabase` style), or an
+`IBlazeDbStorage` to persist. Tables are discovered from `DbSet` properties; there is no
+`OpenAsync` and no `AddTable` on this path.
+
+`OnConfiguring` works too:
+
+```csharp
+protected override void OnConfiguring(DbContextOptionsBuilder options)
+    => options.UseBlazeDb();
+```
+
+When the storage backend is asynchronous (OPFS in the browser), call
+`await context.Database.EnsureCreatedAsync()` once before the first synchronous query.
+In-memory stores open synchronously and need no extra step.
 
 Two things are worth knowing, because they follow from the engine being memory-first rather than
 from anything EF does:
@@ -194,7 +211,7 @@ from anything EF does:
   what moves the secondary index entries onto the new values. Reading a value you have modified but
   not yet saved therefore gives you the modified one.
 - **`SaveChanges` is a memory operation.** It returns as soon as the transaction commits; the log
-  reaches storage on the flush interval, or immediately if you call `db.FlushAsync()`.
+  reaches storage on the flush interval, or immediately if you call `context.Database.GetBlazeDb().FlushAsync()`.
 
 The model comes from the same attributes the engine uses: `[BlazeDbKey]` names the primary key whatever it
 is called, and `[BlazeDbIgnore]` keeps a property out of the entity type as well as out of the row bytes.

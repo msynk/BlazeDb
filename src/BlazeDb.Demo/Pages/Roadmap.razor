@@ -28,13 +28,14 @@
 </Section>
 
 <Section Title="The EF Core provider" IconName="layers"
-         Lead="A translation layer, not a second database: UseBlazeDb points a DbContext at an open engine, LINQ becomes a query plan, and SaveChanges is one transaction.">
+         Lead="A translation layer, not a second database: AddDbContext plus UseBlazeDb is the whole setup, LINQ becomes a query plan, and SaveChanges is one transaction.">
     <div class="grid grid-2">
         <Panel Title="What it is" IconName="schema">
             <p class="small mb-2">
                 Entity types are the same <code>[BlazeDbTable]</code> classes the rest of the engine
-                uses. Queries hand back the live row, so tracking needs no materialisation step, and
-                a mutation is visible in memory before <code>SaveChanges</code> journals it.
+                uses. <code>AddDbContext</code> and <code>UseBlazeDb</code> are the setup; queries
+                hand back the live row, so tracking needs no materialisation step, and a mutation is
+                visible in memory before <code>SaveChanges</code> journals it.
             </p>
             <a class="btn btn-sm" href="efcore">
                 <Icon Name="arrow-right" /> Open the EF Core page
@@ -184,7 +185,7 @@
             null, ""),
 
         new("EF Core provider", "layers", "BlazeDb.EntityFrameworkCore",
-            "UseBlazeDb over an open database, entity types mapped to the generated descriptors, SaveChanges as one transaction, and LINQ translated onto the query plan with index selection. Queries hand back the live row, so tracking needs no materialization step.",
+            "AddDbContext / UseBlazeDb over the generated descriptors, SaveChanges as one transaction, and LINQ translated onto the query plan with index selection. Queries hand back the live row, so tracking needs no materialization step.",
             "efcore", "Run it against this database"),
     ];
 
