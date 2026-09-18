@@ -28,6 +28,9 @@ jobs:
       - name: Pack
         run: dotnet pack src/BlazeDb.slnx --no-build --configuration Release --output artifacts
 
+      - name: Verify package contents
+        run: bash .github/workflows/verify-packages.sh artifacts
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

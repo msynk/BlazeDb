@@ -15,7 +15,10 @@ namespace BlazeDb.EntityFrameworkCore.Query;
 /// </summary>
 internal static class BlazeDbQueryTranslator
 {
-    public static BlazeDbTranslatedQuery Translate(Expression expression, IBlazeDbTableBinding binding, Type entityClrType)
+    // useIndexes: false makes every predicate a filter and every ordering a sort, for the moments the
+    // secondary indexes cannot be trusted - see BlazeDbQueryExecutor. A primary-key lookup is still taken.
+    public static BlazeDbTranslatedQuery Translate(
+        Expression expression, IBlazeDbTableBinding binding, Type entityClrType, bool useIndexes = true)
     {
         var chain = Decompose(expression);
         var plan = binding.CreatePlan();
@@ -87,7 +90,7 @@ internal static class BlazeDbQueryTranslator
     done:
         // Index selection happens once the whole prefix is known, so an ordering can influence it:
         // an OrderBy over an indexed property is answered by walking that index instead of sorting.
-        var selection = BlazeDbIndexSelector.Choose(plan, binding, predicates, orderings);
+        var selection = BlazeDbIndexSelector.Choose(plan, binding, predicates, orderings, useIndexes);
         foreach (var predicate in selection.Residual)
         {
             plan.AddPredicate(predicate);

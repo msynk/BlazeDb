@@ -14,6 +14,9 @@ internal static partial class BlazeDbIndexedDbInterop
     [JSImport("openDatabase", ModuleName)]
     public static partial Task<JSObject> OpenDatabase(string databaseName);
 
+    [JSImport("openExistingDatabase", ModuleName)]
+    public static partial Task<JSObject?> OpenExistingDatabase(string databaseName);
+
     [JSImport("readFile", ModuleName)]
     public static partial Task<JSObject?> ReadFile(JSObject db, string name);
 

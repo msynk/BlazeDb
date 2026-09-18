@@ -11,11 +11,17 @@ internal static partial class BlazeDbOpfsInterop
 
     public static Task EnsureModuleAsync(string? moduleUrl) => BlazeDbBrowserModules.EnsureAsync(ModuleName, moduleUrl);
 
+    [JSImport("hasWebLocks", ModuleName)]
+    public static partial bool HasWebLocks();
+
     [JSImport("acquireLock", ModuleName)]
-    public static partial Task<bool> AcquireLock(string lockName);
+    public static partial Task<bool> AcquireLock(string lockName, bool allowWithoutWebLocks);
 
     [JSImport("releaseLock", ModuleName)]
     public static partial void ReleaseLock(string lockName);
+
+    [JSImport("isLockHeld", ModuleName)]
+    public static partial bool IsLockHeld(string lockName);
 
     [JSImport("openDatabaseDirectory", ModuleName)]
     public static partial Task<JSObject> OpenDatabaseDirectory(string databaseName);

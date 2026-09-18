@@ -6,4 +6,8 @@ public sealed class BlazeDbDatabaseLockedException : BlazeDbException
     public BlazeDbDatabaseLockedException(string message) : base(message)
     {
     }
+
+    public BlazeDbDatabaseLockedException(string message, Exception inner) : base(message, inner)
+    {
+    }
 }

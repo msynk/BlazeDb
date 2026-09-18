@@ -7,14 +7,30 @@ namespace BlazeDb.EntityFrameworkCore.Infrastructure;
 /// <summary>
 /// Holds opened engines keyed by store identity so scoped contexts share one in-memory dataset,
 /// the way a SQLite file outlives any one connection.
+/// <para>
+/// Each store has its own gate, held for the whole of an open: two contexts racing to be first -
+/// an <c>EnsureCreatedAsync</c> overlapping a synchronous first query, say - must not both recover
+/// the same storage, which would put two engines and two flushers on one log. The loser waits and
+/// gets the winner's engine.
+/// </para>
 /// </summary>
 internal sealed class BlazeDbEngineCache
 {
     private readonly Dictionary<object, Slot> _slots = [];
     private readonly object _gate = new();
+    private int _version;
 
-    public BlazeDbDatabase GetOrCreate(BlazeDbOptionsExtension extension, IModel model)
+    /// <summary>
+    /// Changes whenever an engine is released, so a context that cached one - see
+    /// <see cref="BlazeDbTableCache"/> - can tell that it has to look the store up again rather
+    /// than keep using an engine another context has disposed with <c>EnsureDeleted</c>.
+    /// </summary>
+    public int Version => Volatile.Read(ref _version);
+
+    /// <summary>The store's engine. <c>created</c> is true when this call opened it, false when it was already open.</summary>
+    public BlazeDbDatabase GetOrCreate(BlazeDbOptionsExtension extension, IModel model, out bool created)
     {
+        created = false;
         if (extension.ExistingDatabase is { } existing)
         {
             EnsureTables(existing, model);
@@ -22,82 +38,131 @@ internal sealed class BlazeDbEngineCache
         }
 
         var key = extension.StoreKey;
-        lock (_gate)
+        while (true)
         {
-            var slot = GetSlot(key);
-            if (slot.Database is not null)
+            var slot = SlotFor(key);
+            if (!slot.Gate.Wait(0))
             {
-                EnsureTables(slot.Database, model);
+                // Someone else is opening this store. On a thread with a synchronization context -
+                // the browser's only thread - waiting here would wait for a continuation that can
+                // only run on this thread, so the caller is told how to start asynchronously instead.
+                ThrowIfCannotBlock();
+                slot.Gate.Wait();
+            }
+            try
+            {
+                if (slot.Removed)
+                {
+                    continue; // Released while we waited; the dictionary has a fresh slot by now.
+                }
+                if (slot.Database is null)
+                {
+                    slot.Database = Open(extension, model);
+                    created = true;
+                }
+                else
+                {
+                    EnsureTables(slot.Database, model);
+                }
                 return slot.Database;
             }
-
-            slot.Database = Open(extension, model);
-            return slot.Database;
+            finally
+            {
+                slot.Gate.Release();
+            }
         }
     }
 
-    public async ValueTask<BlazeDbDatabase> GetOrCreateAsync(
+    public async ValueTask<(BlazeDbDatabase Database, bool Created)> GetOrCreateAsync(
         BlazeDbOptionsExtension extension, IModel model, CancellationToken cancellationToken)
     {
         if (extension.ExistingDatabase is { } existing)
         {
             EnsureTables(existing, model);
-            return existing;
+            return (existing, false);
         }
 
         var key = extension.StoreKey;
-        Slot slot;
-        lock (_gate)
+        while (true)
         {
-            slot = GetSlot(key);
-            if (slot.Database is not null)
+            var slot = SlotFor(key);
+            await slot.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
+                if (slot.Removed)
+                {
+                    continue;
+                }
+                if (slot.Database is null)
+                {
+                    slot.Database = await OpenAsync(extension, model, cancellationToken).ConfigureAwait(false);
+                    return (slot.Database, true);
+                }
                 EnsureTables(slot.Database, model);
-                return slot.Database;
+                return (slot.Database, false);
             }
-        }
-
-        var opened = await OpenAsync(extension, model, cancellationToken).ConfigureAwait(false);
-        lock (_gate)
-        {
-            if (slot.Database is null)
+            finally
             {
-                slot.Database = opened;
-                return slot.Database;
+                slot.Gate.Release();
             }
-
-            EnsureTables(slot.Database, model);
         }
-
-        if (!ReferenceEquals(slot.Database, opened))
-        {
-            await opened.DisposeAsync().ConfigureAwait(false);
-        }
-
-        return slot.Database!;
     }
 
+    /// <summary>Disposes the store's engine and forgets it, so the next access opens afresh.</summary>
     public async ValueTask ReleaseAsync(object key)
     {
         Slot? slot;
         lock (_gate)
         {
-            if (!_slots.Remove(key, out slot) || slot.Database is null)
+            if (!_slots.TryGetValue(key, out slot))
             {
                 return;
             }
         }
 
-        await slot.Database.DisposeAsync().ConfigureAwait(false);
+        // Taken so an open in flight finishes first and is then disposed, rather than escaping
+        // into a slot nobody can find any more.
+        await slot.Gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            lock (_gate)
+            {
+                _slots.Remove(key);
+                slot.Removed = true;
+            }
+            Interlocked.Increment(ref _version);
+            if (slot.Database is { } database)
+            {
+                slot.Database = null;
+                await database.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            slot.Gate.Release();
+        }
     }
 
-    private Slot GetSlot(object key)
+    private Slot SlotFor(object key)
     {
-        if (!_slots.TryGetValue(key, out var slot))
+        lock (_gate)
         {
-            _slots[key] = slot = new Slot();
+            if (!_slots.TryGetValue(key, out var slot))
+            {
+                _slots[key] = slot = new Slot();
+            }
+            return slot;
         }
-        return slot;
+    }
+
+    private static void ThrowIfCannotBlock()
+    {
+        if (SynchronizationContext.Current is not null)
+        {
+            throw new InvalidOperationException(
+                "This BlazeDb store is being opened asynchronously. Await " +
+                "context.Database.EnsureCreatedAsync() before the first synchronous query.");
+        }
     }
 
     private static BlazeDbDatabase Open(BlazeDbOptionsExtension extension, IModel model)
@@ -149,6 +214,8 @@ internal sealed class BlazeDbEngineCache
 
     private sealed class Slot
     {
+        public readonly SemaphoreSlim Gate = new(1, 1);
         public BlazeDbDatabase? Database;
+        public bool Removed;
     }
 }

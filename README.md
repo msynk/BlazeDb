@@ -97,6 +97,18 @@ currently holds, so mutating that instance's indexed properties and passing it b
 rather than left to strand index entries. To write a row that was changed in place, hand the table
 the values it had: `todos.UpdateInPlace(row, previousValues)` / `todos.DeleteInPlace(key,
 previousValues)` - which is what the EF Core provider does with the change tracker's originals.
+`previousValues` must carry every indexed property as the table last saw it; if the row has been
+written since those values were taken, the call throws `BlazeDbStaleRowException` instead of
+leaving the row indexed twice.
+
+Null values are indexed like any other: `todos.Lookup(TodoItem.Indexes.Category, null)` returns
+the uncategorized rows, ordering by an index puts them first (as `OrderBy` does), and a bounded
+`Range` excludes them. A unique index still allows any number of nulls.
+
+On desktop, `BlazeDbFileStorage` takes an exclusive lock on its directory for as long as it lives -
+dispose it when the database is closed - and `BlazeDbFileStorage.OpenReadOnly(dir)` opens the same
+directory for a follower that only reads. `BlazeDbDatabase.DeleteAsync(storage)` removes a database
+from any backend.
 
 Streaming a large result set without blocking the browser's only thread:
 
@@ -171,15 +183,27 @@ await BlazeDbTabSync.CreateReplicaAsync("mydb", replica, onChanged: RefreshUiAsy
 
 `CreateReadOnlyAsync` returns `null` when the database does not exist yet, rather than creating an
 empty one: a replica that opens before the writer has written anything should wait for it, not
-invent a database of its own.
+invent a database of its own. The storage it returns refuses every write, so forgetting
+`ReadOnly = true` cannot turn a replica into a second, unelected writer on the same files.
 
-Where OPFS is unavailable (Firefox private windows, older Safari), swap in `BlazeDbIndexedDbStorage`:
+A reload reads the whole generation - manifest, snapshot and log - before it touches a single row,
+and re-reads the manifest at the end. A checkpoint that lands halfway through is noticed and the
+read starts again; a reload that fails leaves the replica serving what it had.
+
+Where OPFS is unavailable (Firefox private windows, older Safari), swap in `BlazeDbIndexedDbStorage`,
+which has the same `CreateAsync` / `CreateReadOnlyAsync` pair:
 
 ```csharp
 IBlazeDbStorage storage = await BlazeDbIndexedDbStorage.IsOpfsAvailableAsync()
     ? await BlazeDbOpfsStorage.CreateAsync("mydb")
     : await BlazeDbIndexedDbStorage.CreateAsync("mydb");
 ```
+
+Both backends need the Web Locks API to elect the writer. On a browser without it `CreateAsync`
+throws rather than guess; pass `allowWithoutWebLocks: true` if the application guarantees a single
+tab. A tab restored from the back/forward cache re-checks that it still holds the lock and stops
+writing - the data stays in memory and `db.LastBackgroundError` says why - if another tab has
+taken over in the meantime.
 
 ## EF Core
 
@@ -215,17 +239,26 @@ protected override void OnConfiguring(DbContextOptionsBuilder options)
 
 When the storage backend is asynchronous (OPFS in the browser), call
 `await context.Database.EnsureCreatedAsync()` once before the first synchronous query.
-In-memory stores open synchronously and need no extra step.
+In-memory stores open synchronously and need no extra step. `EnsureCreated` returns `true` for
+the call that opened the store and `false` after that, so `if (EnsureCreated()) Seed();` works
+as it does with other providers. `EnsureDeleted` removes the store's files as well as closing it.
 
-Two things are worth knowing, because they follow from the engine being memory-first rather than
+Three things are worth knowing, because they follow from the engine being memory-first rather than
 from anything EF does:
 
 - **A query returns the row itself, not a copy.** Mutating a tracked entity changes the database in
   memory immediately; `SaveChanges` is what commits it as one transaction and one WAL record, and
   what moves the secondary index entries onto the new values. Reading a value you have modified but
-  not yet saved therefore gives you the modified one.
+  not yet saved therefore gives you the modified one - from a query as well: while a tracked entity
+  of that type has unsaved changes, queries read the rows instead of the indexes so both agree.
 - **`SaveChanges` is a memory operation.** It returns as soon as the transaction commits; the log
   reaches storage on the flush interval, or immediately if you call `context.Database.GetBlazeDb().FlushAsync()`.
+- **Two contexts on one store track the same objects.** Each keeps its own original values, so if
+  both load a row and both save it, the second save describes a state the row has moved past and
+  fails with `DbUpdateConcurrencyException`; reload and retry, as with any provider. A save cannot
+  join a transaction another context has open. And after a rollback, the entities whose saves were
+  undone are detached - the objects still hold the undone values, and the next query loads the rows
+  as the database has them.
 
 The model comes from the same attributes the engine uses: `[BlazeDbKey]` names the primary key whatever it
 is called, and `[BlazeDbIgnore]` keeps a property out of the entity type as well as out of the row bytes.
@@ -295,5 +328,15 @@ Pack produces `BlazeDb`, `BlazeDb.Browser` and `BlazeDb.EntityFrameworkCore` (pl
 symbol packages) under `artifacts/`. Version comes from `VersionPrefix` in
 `src/Directory.Build.props`; override it with `-p:Version=1.2.3`.
 
-Pushing a `v*` tag (for example `v0.1.0`) runs `.github/workflows/release.yml`, which packs
-that version and pushes to NuGet.org. Create a `NUGET_API_KEY` repository secret first.
+Pushing a `v*` tag (for example `v0.1.0`) runs `.github/workflows/release.yml`, which builds and
+tests that tag, packs it, checks the packages carry the source generator and the browser modules
+(`.github/workflows/verify-packages.sh`), and pushes to NuGet.org. Create a `NUGET_API_KEY`
+repository secret first.
+
+### Schema evolution
+
+Field numbers identify properties in the binary format. Without `[BlazeDbField(n)]` they follow
+declaration order, so adding, removing or reordering a property renumbers the ones after it and
+rows already on disk decode into the wrong properties without an error. Pin every property's number
+before a type persists real data; the generator warns (`BLZ013`) when a type pins some numbers but
+not others, which is the case where an automatic number moves most easily.

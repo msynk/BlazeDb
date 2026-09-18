@@ -106,13 +106,19 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
     /// <summary>Adds a new row; throws <see cref="BlazeDbDuplicateKeyException"/> if the key exists.</summary>
     public void Insert(TRow row)
     {
-        var key = Descriptor.KeySelector(row);
-        if (_rows.ContainsKey(key))
+        // The checks and the write they guard happen under one lock, so two writers cannot both find
+        // the key free and then overwrite one another instead of one of them being refused. Every
+        // write below is locked for the same reason; the lock is the one ApplyWrite takes.
+        lock (_db.SyncRoot)
         {
-            throw new BlazeDbDuplicateKeyException(Name, key);
+            var key = Descriptor.KeySelector(row);
+            if (_rows.ContainsKey(key))
+            {
+                throw new BlazeDbDuplicateKeyException(Name, key);
+            }
+            ValidateUnique(row, replacedSeq: 0);
+            _db.ApplyWrite(new SetOp(this, key, row, hadOld: false, default, 0));
         }
-        ValidateUnique(row, replacedSeq: 0);
-        _db.ApplyWrite(new SetOp(this, key, row, hadOld: false, default, 0));
     }
 
     /// <summary>
@@ -123,35 +129,41 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
     /// </summary>
     public void Update(TRow row)
     {
-        var key = Descriptor.KeySelector(row);
-        if (!_rows.TryGetValue(key, out var old))
+        lock (_db.SyncRoot)
         {
-            throw new KeyNotFoundException($"Table '{Name}' has no row with key '{key}'.");
+            var key = Descriptor.KeySelector(row);
+            if (!_rows.TryGetValue(key, out var old))
+            {
+                throw new KeyNotFoundException($"Table '{Name}' has no row with key '{key}'.");
+            }
+            EnsureNotMutatedInPlace(row, old, nameof(UpdateInPlace));
+            ValidateUnique(row, old.Seq);
+            _db.ApplyWrite(new SetOp(this, key, row, hadOld: true, old.Row, old.Seq));
         }
-        EnsureNotMutatedInPlace(row, old, nameof(UpdateInPlace));
-        ValidateUnique(row, old.Seq);
-        _db.ApplyWrite(new SetOp(this, key, row, hadOld: true, old.Row, old.Seq));
     }
 
     /// <summary>Inserts or replaces. See <see cref="Update"/> for the rules on replacing.</summary>
     public void Upsert(TRow row)
     {
-        var key = Descriptor.KeySelector(row);
-        var had = _rows.TryGetValue(key, out var old);
-        if (had)
+        lock (_db.SyncRoot)
         {
-            EnsureNotMutatedInPlace(row, old, nameof(UpdateInPlace));
+            var key = Descriptor.KeySelector(row);
+            var had = _rows.TryGetValue(key, out var old);
+            if (had)
+            {
+                EnsureNotMutatedInPlace(row, old, nameof(UpdateInPlace));
+            }
+            ValidateUnique(row, had ? old.Seq : 0);
+            _db.ApplyWrite(new SetOp(this, key, row, had, had ? old.Row : default, old.Seq));
         }
-        ValidateUnique(row, had ? old.Seq : 0);
-        _db.ApplyWrite(new SetOp(this, key, row, had, had ? old.Row : default, old.Seq));
     }
 
     /// <summary>
     /// Refuses a write that would strand index entries: the caller mutated the very instance the
     /// table holds and handed it back, so the values the indexes were built from are gone. Failing
     /// here, with a pointer to the right call, beats an index that quietly returns wrong rows. The
-    /// check is only paid on that path - a fresh instance never triggers it - and it cannot see a
-    /// value that was changed to null, since nulls are not indexed; the caller-side rule stands.
+    /// check is only paid on that path - a fresh instance never triggers it - and it covers a value
+    /// that was changed to null as well, since the indexes record those entries too.
     /// </summary>
     private void EnsureNotMutatedInPlace(TRow row, Entry held, string alternative)
     {
@@ -191,13 +203,16 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
     /// </summary>
     public bool Delete(TKey key)
     {
-        if (!_rows.TryGetValue(key, out var old))
+        lock (_db.SyncRoot)
         {
-            return false;
+            if (!_rows.TryGetValue(key, out var old))
+            {
+                return false;
+            }
+            EnsureNotMutatedInPlace(old.Row, old, nameof(DeleteInPlace));
+            _db.ApplyWrite(new DeleteOp(this, key, old.Row, old.Seq));
+            return true;
         }
-        EnsureNotMutatedInPlace(old.Row, old, nameof(DeleteInPlace));
-        _db.ApplyWrite(new DeleteOp(this, key, old.Row, old.Seq));
-        return true;
     }
 
     // ---- Writes against rows that were mutated in place ----
@@ -217,32 +232,32 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
     public void UpdateInPlace(TRow row, TRow previousValues)
     {
         _db.EnsureWritable();
-        var key = Descriptor.KeySelector(row);
-        if (!_rows.TryGetValue(key, out var old))
-        {
-            throw new KeyNotFoundException($"Table '{Name}' has no row with key '{key}'.");
-        }
-        if (!EqualityComparer<TKey>.Default.Equals(Descriptor.KeySelector(previousValues), key))
-        {
-            throw new InvalidOperationException(
-                $"The primary key of a row in table '{Name}' cannot be changed in place; " +
-                "delete the old row and insert a new one.");
-        }
-
-        // A violation is checked before anything is touched. The caller's instance stays the row the
-        // table holds - a change tracker keeps its identity, and a corrected retry with the same
-        // previousValues still finds the index entries - while the indexes go on describing the
-        // pre-mutation values until a write moves them.
-        ValidateUnique(row, old.Seq);
-
-        // Point the entry at the pre-mutation values so the write's index maintenance retracts the
-        // entries that actually exist (and so a rollback restores them). Under the lock like every
-        // other mutation: the background flusher walks this map to build a snapshot.
         lock (_db.SyncRoot)
         {
+            var key = Descriptor.KeySelector(row);
+            if (!_rows.TryGetValue(key, out var old))
+            {
+                throw new KeyNotFoundException($"Table '{Name}' has no row with key '{key}'.");
+            }
+            if (!EqualityComparer<TKey>.Default.Equals(Descriptor.KeySelector(previousValues), key))
+            {
+                throw new InvalidOperationException(
+                    $"The primary key of a row in table '{Name}' cannot be changed in place; " +
+                    "delete the old row and insert a new one.");
+            }
+
+            // Both checks run before anything is touched. The caller's instance stays the row the
+            // table holds - a change tracker keeps its identity, and a corrected retry with the same
+            // previousValues still finds the index entries - while the indexes go on describing the
+            // pre-mutation values until a write moves them.
+            EnsurePreviousValuesMatch(previousValues, old.Seq);
+            ValidateUnique(row, old.Seq);
+
+            // Point the entry at the pre-mutation values so the write's index maintenance retracts
+            // the entries that actually exist (and so a rollback restores them).
             _rows[key] = new Entry(previousValues, old.Seq);
+            _db.ApplyWrite(new SetOp(this, key, row, hadOld: true, previousValues, old.Seq));
         }
-        _db.ApplyWrite(new SetOp(this, key, row, hadOld: true, previousValues, old.Seq));
     }
 
     /// <summary>
@@ -252,16 +267,35 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
     public bool DeleteInPlace(TKey key, TRow previousValues)
     {
         _db.EnsureWritable();
-        if (!_rows.TryGetValue(key, out var old))
-        {
-            return false;
-        }
         lock (_db.SyncRoot)
         {
+            if (!_rows.TryGetValue(key, out var old))
+            {
+                return false;
+            }
+            EnsurePreviousValuesMatch(previousValues, old.Seq);
             _rows[key] = new Entry(previousValues, old.Seq);
+            _db.ApplyWrite(new DeleteOp(this, key, previousValues, old.Seq));
+            return true;
         }
-        _db.ApplyWrite(new DeleteOp(this, key, previousValues, old.Seq));
-        return true;
+    }
+
+    /// <summary>
+    /// Refuses an in-place write whose <c>previousValues</c> are not what the indexes were built
+    /// from. Retracting an entry that is not there leaves the row indexed under a value it no longer
+    /// carries and adds a second entry under the value it does, so the same row comes back twice from
+    /// one lookup - silent, and impossible to explain later. The caller's state is the stale thing
+    /// here, so it is told so rather than the table quietly going wrong.
+    /// </summary>
+    private void EnsurePreviousValuesMatch(TRow previousValues, long seq)
+    {
+        foreach (var store in _indexStores)
+        {
+            if (!store.EntryMatches(previousValues, seq))
+            {
+                throw new BlazeDbStaleRowException(Name, ((BlazeDbIndexDefinition<TRow>)store.Definition).Name);
+            }
+        }
     }
 
     // ---- Raw mutation primitives (index-maintaining; used by ops, replay and snapshot load) ----

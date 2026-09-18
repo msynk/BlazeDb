@@ -11,18 +11,29 @@ namespace BlazeDb.Wal;
 /// File layout (all referenced from an atomic manifest):
 ///   manifest.blz     magic BLZM, version, generation, snapshot file, wal file, snapshot LSN, CRC
 ///   snapshot-N.blz   magic BLZS, version, LSN, per-table row dumps, CRC
-///   wal-N.blz        sequence of records: [len:4][lsn:8][crc:4][payload]
+///   wal-N.blz        sequence of records: magic BLZR, [len:4][lsn:8][crc:4][payload]
 /// Recovery = load snapshot, then replay WAL records with LSN &gt; snapshot LSN, stopping at the
-/// first torn/corrupt record.
+/// first torn/corrupt record. The checksum covers the length and the LSN as well as the payload,
+/// so a corrupted header cannot make replay skip a commit or misread where a record ends.
 /// </summary>
 internal sealed class BlazeDbWalManager : IAsyncDisposable
 {
     private const string ManifestFile = "manifest.blz";
     private static ReadOnlySpan<byte> ManifestMagic => "BLZM"u8;
     private static ReadOnlySpan<byte> SnapshotMagic => "BLZS"u8;
+    private static ReadOnlySpan<byte> RecordMagic => "BLZR"u8;
     private const byte FormatVersion = 1;
-    private const int RecordHeaderSize = 16;
+    private const int RecordMagicSize = 4;
+    private const int RecordChecksummedSize = sizeof(uint) + sizeof(ulong); // length + LSN
+    private const int RecordHeaderSize = RecordMagicSize + RecordChecksummedSize + sizeof(uint);
     private const int MaxRecordSize = 256 * 1024 * 1024;
+
+    /// <summary>
+    /// How many times a read of a whole generation is retried when a checkpoint replaces it
+    /// underneath. Each retry starts from the manifest the checkpoint left, so one is normally
+    /// enough; the limit only stops an unbounded loop against a pathologically busy writer.
+    /// </summary>
+    private const int MaxGenerationRetries = 3;
 
     private readonly BlazeDbDatabase _db;
     private readonly IBlazeDbStorage _storage;
@@ -30,6 +41,7 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
 
     // Pending WAL bytes not yet flushed; guarded by _db.SyncRoot.
     private readonly BlazeDbBufferWriter _pending = new(16 * 1024);
+    private readonly BlazeDbBufferWriter _recordScratch = new(4 * 1024);
     private readonly BlazeDbBufferWriter _payloadScratch = new(4 * 1024);
     private readonly BlazeDbBufferWriter _valueScratch = new(1024);
 
@@ -50,6 +62,10 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
     private long _snapshotLsn;
     private long _lastLsn;
     private long _walSize;
+
+    // Set when an append threw: it may have left a partial record on storage, which has to be cut
+    // off before the retry appends behind it. See RepairWalAsync.
+    private bool _walNeedsRepair;
 
     private BlazeDbStorageQuota? _lastQuota;
     private bool _quotaPressureReported;
@@ -77,23 +93,17 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
     /// Rebuilds in-memory state from what is currently on storage. Used by replica tabs to catch
     /// up with the writer; recovery is re-run from scratch rather than diffed, which keeps the
     /// path identical to opening the database and so avoids a second, rarely exercised code path.
+    /// <para>
+    /// The tables are not touched until the whole generation has been read and checksummed, so a
+    /// reload that cannot get at the newer state leaves the replica serving the older one rather
+    /// than emptying it, and no reader can catch the tables mid-rebuild.
+    /// </para>
     /// </summary>
     public async ValueTask ReloadAsync(CancellationToken ct = default)
     {
         await _ioLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            lock (_db.SyncRoot)
-            {
-                _db.ResetTables();
-                _pending.Reset();
-                _generation = 0;
-                _snapshotFile = "";
-                _walFile = "";
-                _snapshotLsn = 0;
-                _lastLsn = 0;
-                _walSize = 0;
-            }
             await RecoverAsync(ct).ConfigureAwait(false);
         }
         finally
@@ -106,7 +116,7 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
 
     public void AppendCommit(IReadOnlyList<IBlazeDbTxnOp> ops)
     {
-        var lsn = ++_lastLsn;
+        var lsn = _lastLsn + 1;
 
         _payloadScratch.Reset();
         _payloadScratch.WriteVarUInt((ulong)ops.Count);
@@ -114,12 +124,21 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
         {
             op.EncodeRedo(_payloadScratch, _valueScratch);
         }
-
         var payload = _payloadScratch.WrittenSpan;
-        _pending.WriteFixed32((uint)payload.Length);
-        _pending.WriteFixed64((ulong)lsn);
-        _pending.WriteFixed32(BlazeDbCrc32.Compute(payload));
-        _pending.WriteRaw(payload);
+
+        // The record is assembled in full before it joins the buffer, and the LSN is only taken
+        // once it has: a failure part-way through encoding - a transaction too large to grow the
+        // buffer for - must not leave a header in the log ahead of a payload that never arrived.
+        _recordScratch.Reset();
+        _recordScratch.WriteRaw(RecordMagic);
+        _recordScratch.WriteFixed32((uint)payload.Length);
+        _recordScratch.WriteFixed64((ulong)lsn);
+        _recordScratch.WriteFixed32(
+            BlazeDbCrc32.Compute(_recordScratch.WrittenSpan.Slice(RecordMagicSize), payload));
+        _recordScratch.WriteRaw(payload);
+
+        _pending.WriteRaw(_recordScratch.WrittenSpan);
+        _lastLsn = lsn;
     }
 
     // ---- Flush / checkpoint ----
@@ -180,7 +199,8 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
         {
             pendingBytes = _pending.Length;
         }
-        if (pendingBytes == 0 || await HasRoomForAsync(quotaAware, pendingBytes, ct).ConfigureAwait(false))
+        var neededBytes = SpaceNeededFor(quotaAware, pendingBytes);
+        if (pendingBytes == 0 || await HasRoomForAsync(quotaAware, neededBytes, pendingBytes, ct).ConfigureAwait(false))
         {
             return;
         }
@@ -196,7 +216,9 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
                 {
                     pendingBytes = _pending.Length;
                 }
-                if (pendingBytes == 0 || await HasRoomForAsync(quotaAware, pendingBytes, ct).ConfigureAwait(false))
+                neededBytes = SpaceNeededFor(quotaAware, pendingBytes);
+                if (pendingBytes == 0 ||
+                    await HasRoomForAsync(quotaAware, neededBytes, pendingBytes, ct).ConfigureAwait(false))
                 {
                     return;
                 }
@@ -219,8 +241,16 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
             _quotaPressureReported = true;
             _options.OnQuotaPressure?.Invoke(quota);
         }
-        throw new BlazeDbStorageQuotaExceededException(quota, pendingBytes);
+        throw new BlazeDbStorageQuotaExceededException(quota, neededBytes);
     }
+
+    /// <summary>
+    /// Room a flush of <paramref name="pendingBytes"/> has to find. A backend that appends in place
+    /// needs only those bytes; one that rewrites the file needs the log it already holds as well,
+    /// because for a moment both copies exist.
+    /// </summary>
+    private long SpaceNeededFor(IBlazeDbQuotaAwareStorage storage, long pendingBytes) =>
+        storage.AppendRewritesWholeFile ? _walSize + pendingBytes : pendingBytes;
 
     /// <summary>
     /// Estimates are comparatively expensive - in the browser it is an async trip through
@@ -228,9 +258,12 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
     /// written since. That projection only ever overstates usage (deletes are ignored), so it is
     /// safe to trust until it says we are nearing the limit, which is when a fresh reading is taken.
     /// </summary>
-    private async ValueTask<bool> HasRoomForAsync(IBlazeDbQuotaAwareStorage storage, long bytes, CancellationToken ct)
+    // neededBytes is the room the write has to find while it runs; growthBytes is how much bigger
+    // the database ends up, which is what the projection carries forward.
+    private async ValueTask<bool> HasRoomForAsync(
+        IBlazeDbQuotaAwareStorage storage, long neededBytes, long growthBytes, CancellationToken ct)
     {
-        if (_lastQuota is not { } quota || quota.QuotaBytes <= 0 || WouldCrowd(quota, bytes))
+        if (_lastQuota is not { } quota || quota.QuotaBytes <= 0 || WouldCrowd(quota, neededBytes))
         {
             _lastQuota = await storage.GetQuotaAsync(ct).ConfigureAwait(false);
             _bytesSinceQuotaCheck = 0;
@@ -241,11 +274,11 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
             quota = refreshed;
         }
 
-        if (WouldCrowd(quota, bytes))
+        if (WouldCrowd(quota, neededBytes))
         {
             return false;
         }
-        _bytesSinceQuotaCheck += bytes;
+        _bytesSinceQuotaCheck += growthBytes;
         return true;
     }
 
@@ -304,6 +337,13 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
         await _ioLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            // Before anything is drained, so a repair that fails leaves the buffer untouched and
+            // the bytes are still there to be written once the log ends on a record boundary again.
+            if (_walNeedsRepair)
+            {
+                await RepairWalAsync(ct).ConfigureAwait(false);
+            }
+
             byte[]? chunk = null;
             lock (_db.SyncRoot)
             {
@@ -325,6 +365,9 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
             }
             catch
             {
+                // The append may have got part of the chunk onto storage before it failed, so the
+                // log has to be trimmed back to whole records before these bytes are written again.
+                _walNeedsRepair = true;
                 // Put the un-flushed bytes back in front of anything committed meanwhile.
                 lock (_db.SyncRoot)
                 {
@@ -341,6 +384,32 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
         {
             _ioLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Cuts a partially written record off the end of the log.
+    ///
+    /// An append that throws can still have put bytes on storage - a disk or a quota that ran out
+    /// part-way through the write - while the retry appends the whole record again. Left alone the
+    /// log would hold a fragment in front of that retry, and replay stops at the first fragment, so
+    /// the retry and every commit after it would be dropped on the next open. Reading the log back
+    /// to find where the records stop is only ever paid after a failure.
+    /// </summary>
+    private async ValueTask RepairWalAsync(CancellationToken ct)
+    {
+        var raw = await _storage.ReadAsync(_walFile, ct).ConfigureAwait(false);
+        if (raw is not null)
+        {
+            var validLength = ScanRecords(raw, replay: false);
+            if (validLength != raw.Length)
+            {
+                await _storage.WriteAtomicAsync(_walFile, raw.AsMemory(0, validLength), ct).ConfigureAwait(false);
+            }
+            _walSize = validLength;
+        }
+        // Cleared only once the log is known to end on a record boundary: a repair that failed has
+        // to run again before the next append, or that append lands behind the fragment after all.
+        _walNeedsRepair = false;
     }
 
     /// <summary>Best-effort cleanup of a half-written generation; never masks the original error.</summary>
@@ -413,6 +482,7 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
             _walFile = newWalFile;
             _snapshotLsn = snapshotLsn;
             _walSize = 0;
+            _walNeedsRepair = false; // The new generation's log is a fresh file with nothing to trim.
             _quotaPressureReported = false; // Compaction freed space; the next refusal is a new episode.
 
             await _storage.DeleteAsync(oldWalFile, ct).ConfigureAwait(false);
@@ -449,15 +519,68 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
 
     // ---- Recovery ----
 
+    /// <summary>
+    /// Removes a database from a backend: everything it holds when it can list its files, otherwise
+    /// the manifest together with the snapshot and log that manifest names.
+    ///
+    /// Deleting only the manifest is not enough and is worse than doing nothing: recovery reads a
+    /// missing manifest as an empty database and writes a fresh one pointing at the first
+    /// generation's log, without truncating the log that is still sitting there - so the next open
+    /// replays the rows the caller asked to be rid of.
+    /// </summary>
+    internal static async ValueTask DeleteAsync(IBlazeDbStorage storage, CancellationToken ct)
+    {
+        // A wrapper - encryption, say - can only enumerate when what it wraps can, so a backend that
+        // says it lists its files may still turn out not to; fall through to the manifest then.
+        if (storage is IBlazeDbEnumerableStorage enumerable)
+        {
+            IReadOnlyCollection<string>? names = null;
+            try
+            {
+                names = await enumerable.ListAsync(ct).ConfigureAwait(false);
+            }
+            catch (NotSupportedException)
+            {
+            }
+            if (names is not null)
+            {
+                foreach (var name in names)
+                {
+                    await storage.DeleteAsync(name, ct).ConfigureAwait(false);
+                }
+                return;
+            }
+        }
+
+        var manifestBytes = await storage.ReadAsync(ManifestFile, ct).ConfigureAwait(false);
+        if (manifestBytes is not null && TryParseManifest(manifestBytes, out var info))
+        {
+            if (info.SnapshotFile.Length > 0)
+            {
+                await storage.DeleteAsync(info.SnapshotFile, ct).ConfigureAwait(false);
+            }
+            await storage.DeleteAsync(info.WalFile, ct).ConfigureAwait(false);
+        }
+        // The first generation's log exists before any manifest names it, and a manifest too corrupt
+        // to read names nothing at all, so that generation is cleared by name as well.
+        await storage.DeleteAsync("snapshot-1.blz", ct).ConfigureAwait(false);
+        await storage.DeleteAsync("wal-1.blz", ct).ConfigureAwait(false);
+        // Last, so a failure part-way through cannot leave a manifest pointing at files that are gone.
+        await storage.DeleteAsync(ManifestFile, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>What a manifest names: the generation and the files that make it up.</summary>
+    private readonly record struct ManifestInfo(ulong Generation, string SnapshotFile, string WalFile, long SnapshotLsn);
+
+    /// <summary>A generation read off storage, before any of it has been decoded into the tables.</summary>
+    private readonly record struct LoadedGeneration(ManifestInfo Info, byte[]? SnapshotBytes, byte[]? WalBytes);
+
     private async ValueTask RecoverAsync(CancellationToken ct)
     {
         var manifestBytes = await _storage.ReadAsync(ManifestFile, ct).ConfigureAwait(false);
         if (manifestBytes is null)
         {
-            _generation = 1;
-            _snapshotFile = "";
-            _walFile = "wal-1.blz";
-            _snapshotLsn = 0;
+            ApplyGeneration(new LoadedGeneration(new ManifestInfo(1, "", "wal-1.blz", 0), null, null));
             if (!_options.ReadOnly)
             {
                 await _storage.WriteAtomicAsync(
@@ -466,32 +589,110 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
             return;
         }
 
-        ParseManifest(manifestBytes);
-        _lastLsn = _snapshotLsn;
+        var loaded = await LoadGenerationAsync(manifestBytes, ct).ConfigureAwait(false);
+        var validLength = ApplyGeneration(loaded);
 
-        if (_snapshotFile.Length > 0)
+        if (loaded.WalBytes is not null && validLength < loaded.WalBytes.Length && !_options.ReadOnly)
         {
-            var snapshotBytes = await _storage.ReadAsync(_snapshotFile, ct).ConfigureAwait(false)
-                ?? throw new BlazeDbCorruptDatabaseException($"Manifest references missing snapshot '{_snapshotFile}'.");
-            try
-            {
-                LoadSnapshot(snapshotBytes);
-            }
-            catch (Exception ex) when (IsDecodeFailure(ex))
-            {
-                throw new BlazeDbCorruptDatabaseException(
-                    $"Snapshot '{_snapshotFile}' passed its checksum but could not be decoded; the row " +
-                    "format may not match the registered table descriptors.", ex);
-            }
+            // Torn tail detected: truncate so future appends continue from a clean point.
+            // A replica leaves it alone - repair is the writer's job, and the tail may simply
+            // be a commit the writer is in the middle of appending.
+            await _storage.WriteAtomicAsync(_walFile, loaded.WalBytes.AsMemory(0, validLength), ct).ConfigureAwait(false);
         }
+    }
 
-        var walBytes = await _storage.ReadAsync(_walFile, ct).ConfigureAwait(false);
-        if (walBytes is not null)
+    /// <summary>
+    /// Reads a whole generation - manifest, snapshot, log - into memory and checks every checksum,
+    /// without decoding any of it into the tables.
+    /// <para>
+    /// The manifest is read again at the end because a writer's checkpoint deletes the files the
+    /// first read named as soon as the new generation is durable: a reader that started before it
+    /// can otherwise find the log already gone and mistake that for a log with nothing in it,
+    /// silently losing every commit the snapshot it did read does not cover. When the generation has
+    /// moved on underneath, the read simply starts again from the manifest the checkpoint left.
+    /// </para>
+    /// </summary>
+    private async ValueTask<LoadedGeneration> LoadGenerationAsync(byte[] manifestBytes, CancellationToken ct)
+    {
+        for (var attempt = 0; ; attempt++)
         {
+            var info = ParseManifest(manifestBytes);
+
+            var snapshotBytes = info.SnapshotFile.Length > 0
+                ? await _storage.ReadAsync(info.SnapshotFile, ct).ConfigureAwait(false)
+                : null;
+            // A missing log is normal: a generation has no log file until its first append.
+            var walBytes = await _storage.ReadAsync(info.WalFile, ct).ConfigureAwait(false);
+
+            var current = await _storage.ReadAsync(ManifestFile, ct).ConfigureAwait(false)
+                ?? throw new BlazeDbCorruptDatabaseException(
+                    "The manifest disappeared while the database was being read.");
+            if (!current.AsSpan().SequenceEqual(manifestBytes))
+            {
+                if (attempt >= MaxGenerationRetries)
+                {
+                    throw new BlazeDbCorruptDatabaseException(
+                        $"The database was checkpointed {attempt + 1} times while it was being read, so no " +
+                        "single generation could be read whole. Retry once the writer settles.");
+                }
+                manifestBytes = current;
+                continue;
+            }
+
+            if (info.SnapshotFile.Length > 0 && snapshotBytes is null)
+            {
+                throw new BlazeDbCorruptDatabaseException($"Manifest references missing snapshot '{info.SnapshotFile}'.");
+            }
+            if (snapshotBytes is not null)
+            {
+                VerifySnapshot(snapshotBytes, info.SnapshotFile);
+            }
+            return new LoadedGeneration(info, snapshotBytes, walBytes);
+        }
+    }
+
+    /// <summary>
+    /// Installs a generation that has already been read and checksummed, and returns the length of
+    /// the log's valid prefix. Clearing the tables, decoding the snapshot and replaying the log all
+    /// happen under the lock with no await between them, so a reload cannot be observed halfway -
+    /// and, because everything was read first, cannot leave the tables empty because storage failed.
+    /// </summary>
+    private int ApplyGeneration(LoadedGeneration loaded)
+    {
+        lock (_db.SyncRoot)
+        {
+            _db.ResetTables();
+            _pending.Reset();
+            _generation = loaded.Info.Generation;
+            _snapshotFile = loaded.Info.SnapshotFile;
+            _walFile = loaded.Info.WalFile;
+            _snapshotLsn = loaded.Info.SnapshotLsn;
+            _lastLsn = loaded.Info.SnapshotLsn;
+            _walSize = 0;
+            _walNeedsRepair = false;
+
+            if (loaded.SnapshotBytes is not null)
+            {
+                try
+                {
+                    LoadSnapshot(loaded.SnapshotBytes);
+                }
+                catch (Exception ex) when (IsDecodeFailure(ex))
+                {
+                    throw new BlazeDbCorruptDatabaseException(
+                        $"Snapshot '{_snapshotFile}' passed its checksum but could not be decoded; the row " +
+                        "format may not match the registered table descriptors.", ex);
+                }
+            }
+
+            if (loaded.WalBytes is null)
+            {
+                return 0;
+            }
             int validLength;
             try
             {
-                validLength = ReplayWal(walBytes);
+                validLength = ScanRecords(loaded.WalBytes, replay: true);
             }
             catch (Exception ex) when (IsDecodeFailure(ex))
             {
@@ -499,24 +700,34 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
                     $"A record in '{_walFile}' passed its checksum but could not be decoded; the row " +
                     "format may not match the registered table descriptors.", ex);
             }
-            if (validLength < walBytes.Length && !_options.ReadOnly)
-            {
-                // Torn tail detected: truncate so future appends continue from a clean point.
-                // A replica leaves it alone - repair is the writer's job, and the tail may simply
-                // be a commit the writer is in the middle of appending.
-                await _storage.WriteAtomicAsync(_walFile, walBytes.AsMemory(0, validLength), ct).ConfigureAwait(false);
-            }
             _walSize = validLength;
+            return validLength;
         }
     }
 
-    /// <summary>Replays valid records and returns the length of the valid prefix.</summary>
-    private int ReplayWal(byte[] walBytes)
+    /// <summary>
+    /// Walks the log's records and returns the length of the valid prefix, replaying every record
+    /// past the snapshot's LSN when asked to.
+    ///
+    /// Scanning stops at the first record that is torn or fails its checksum. Everything after such
+    /// a record was written later, so carrying on could apply a commit whose predecessor was lost -
+    /// a state the database was never in. A fragment a failed append left behind is cut off by
+    /// <see cref="RepairWalAsync"/> before the retry is written, so stopping here does not cost the
+    /// commits that followed it.
+    /// </summary>
+    private int ScanRecords(byte[] walBytes, bool replay)
     {
         var offset = 0;
+        var lastLsn = _lastLsn;
         while (walBytes.Length - offset >= RecordHeaderSize)
         {
-            var header = new BlazeDbBufferReader(walBytes.AsSpan(offset, RecordHeaderSize));
+            var record = walBytes.AsSpan(offset);
+            if (!record.Slice(0, RecordMagicSize).SequenceEqual(RecordMagic))
+            {
+                break;
+            }
+
+            var header = new BlazeDbBufferReader(record.Slice(RecordMagicSize, RecordHeaderSize - RecordMagicSize));
             var payloadLength = (int)header.ReadFixed32();
             var lsn = (long)header.ReadFixed64();
             var expectedCrc = header.ReadFixed32();
@@ -527,18 +738,23 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
                 break;
             }
 
-            var payload = walBytes.AsSpan(offset + RecordHeaderSize, payloadLength);
-            if (BlazeDbCrc32.Compute(payload) != expectedCrc)
+            var payload = record.Slice(RecordHeaderSize, payloadLength);
+            if (BlazeDbCrc32.Compute(record.Slice(RecordMagicSize, RecordChecksummedSize), payload) != expectedCrc)
             {
                 break;
             }
 
-            if (lsn > _snapshotLsn)
+            if (replay && lsn > _snapshotLsn)
             {
                 ReplayCommit(payload);
-                _lastLsn = Math.Max(_lastLsn, lsn);
             }
+            lastLsn = Math.Max(lastLsn, lsn);
             offset += RecordHeaderSize + payloadLength;
+        }
+
+        if (replay)
+        {
+            _lastLsn = lastLsn;
         }
         return offset;
     }
@@ -594,26 +810,34 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
         return writer.ToArray();
     }
 
-    private void LoadSnapshot(byte[] bytes)
+    /// <summary>
+    /// Checks a snapshot's header and checksum. Kept apart from decoding it so the tables are only
+    /// cleared once the bytes that will replace their contents are known to be intact.
+    /// </summary>
+    private static void VerifySnapshot(byte[] bytes, string name)
     {
         if (bytes.Length < SnapshotMagic.Length + 1 + 4 ||
             !bytes.AsSpan(0, 4).SequenceEqual(SnapshotMagic))
         {
-            throw new BlazeDbCorruptDatabaseException("Snapshot file has an invalid header.");
+            throw new BlazeDbCorruptDatabaseException($"Snapshot '{name}' has an invalid header.");
         }
         var body = bytes.AsSpan(0, bytes.Length - 4);
         var crcReader = new BlazeDbBufferReader(bytes.AsSpan(bytes.Length - 4));
         if (BlazeDbCrc32.Compute(body) != crcReader.ReadFixed32())
         {
-            throw new BlazeDbCorruptDatabaseException("Snapshot file failed checksum validation.");
+            throw new BlazeDbCorruptDatabaseException($"Snapshot '{name}' failed checksum validation.");
         }
-
-        var reader = new BlazeDbBufferReader(body.Slice(4));
-        var version = reader.ReadByte();
+        var version = body.Slice(4)[0];
         if (version != FormatVersion)
         {
             throw new BlazeDbCorruptDatabaseException($"Unsupported snapshot format version {version}.");
         }
+    }
+
+    private void LoadSnapshot(byte[] bytes)
+    {
+        var reader = new BlazeDbBufferReader(bytes.AsSpan(4, bytes.Length - 4 - 4));
+        reader.ReadByte(); // format version; already checked by VerifySnapshot
         reader.ReadVarUInt(); // snapshot LSN; authoritative value comes from the manifest
         var tableCount = checked((int)reader.ReadVarUInt());
         for (var i = 0; i < tableCount; i++)
@@ -636,7 +860,22 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
         return writer.ToArray();
     }
 
-    private void ParseManifest(byte[] bytes)
+    /// <summary>Parses a manifest, reporting a corrupt one as false rather than throwing.</summary>
+    private static bool TryParseManifest(byte[] bytes, out ManifestInfo info)
+    {
+        try
+        {
+            info = ParseManifest(bytes);
+            return true;
+        }
+        catch (Exception ex) when (ex is BlazeDbCorruptDatabaseException or InvalidDataException)
+        {
+            info = default;
+            return false;
+        }
+    }
+
+    private static ManifestInfo ParseManifest(byte[] bytes)
     {
         if (bytes.Length < ManifestMagic.Length + 1 + 4 ||
             !bytes.AsSpan(0, 4).SequenceEqual(ManifestMagic))
@@ -656,10 +895,10 @@ internal sealed class BlazeDbWalManager : IAsyncDisposable
         {
             throw new BlazeDbCorruptDatabaseException($"Unsupported manifest format version {version}.");
         }
-        _generation = reader.ReadVarUInt();
-        _snapshotFile = reader.ReadString();
-        _walFile = reader.ReadString();
-        _snapshotLsn = (long)reader.ReadVarUInt();
+        var generation = reader.ReadVarUInt();
+        var snapshotFile = reader.ReadString();
+        var walFile = reader.ReadString();
+        return new ManifestInfo(generation, snapshotFile, walFile, (long)reader.ReadVarUInt());
     }
 
     public async ValueTask DisposeAsync()

@@ -59,15 +59,50 @@ public class QueryTests
     }
 
     [Fact]
-    public async Task Null_Index_Values_Are_Not_Indexed()
+    public async Task Null_Index_Values_Are_Looked_Up_Like_Any_Other()
     {
+        // A null is recorded in the index as a value of its own: a lookup for null finds those rows,
+        // and the entry is there to be retracted when the row changes or goes away.
         var (db, todos) = await OpenAsync();
         await using var _ = db;
         todos.Insert(Make("categorized", category: "work"));
-        todos.Insert(Make("uncategorized", category: null));
+        var uncategorized = Make("uncategorized", category: null);
+        todos.Insert(uncategorized);
 
         Assert.Single(todos.Lookup(TodoItem.Indexes.Category, "work"));
-        Assert.Empty(todos.Lookup(TodoItem.Indexes.Category, null!));
+        Assert.Same(uncategorized, todos.Lookup(TodoItem.Indexes.Category, null).Single());
+        Assert.Equal(1, todos.CountBy(TodoItem.Indexes.Category, null));
+
+        todos.Delete(uncategorized.Id);
+        Assert.Empty(todos.Lookup(TodoItem.Indexes.Category, null));
+    }
+
+    [Fact]
+    public async Task Ordering_By_An_Index_Includes_Rows_Whose_Value_Is_Null()
+    {
+        // Sorting by a value that is sometimes null still returns every row, nulls first - the same
+        // as LINQ's OrderBy - so walking the index answers the ordering exactly as sorting would.
+        // A bounded range, on the other hand, excludes them: null is inside no interval.
+        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
+        {
+            FlushInterval = TimeSpan.FromHours(1),
+        }.AddTable(Account.Table));
+        await using var _ = db;
+        var accounts = db.GetTable(Account.Table);
+
+        Account Make(int id, int? slot) => new()
+        {
+            Id = id, Username = "u" + id, Email = $"u{id}@x", TenantId = 1, Slot = slot,
+        };
+        accounts.Insert(Make(1, 5));
+        accounts.Insert(Make(2, null));
+        accounts.Insert(Make(3, 2));
+
+        Assert.Equal([2, 3, 1], accounts.OrderBy(Account.Indexes.Slot).Select(a => a.Id));
+        Assert.Equal([1, 3, 2], accounts.OrderBy(Account.Indexes.Slot, descending: true).Select(a => a.Id));
+        Assert.Equal(
+            [3, 1],
+            accounts.Range(Account.Indexes.Slot, BlazeDbBound<int?>.Unbounded, BlazeDbBound<int?>.At(10)).Select(a => a.Id));
     }
 
     [Fact]

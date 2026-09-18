@@ -20,13 +20,23 @@ internal static class BlazeDbCrc32
         return table;
     }
 
-    public static uint Compute(ReadOnlySpan<byte> data)
+    public static uint Compute(ReadOnlySpan<byte> data) => Finish(Update(Seed, data));
+
+    /// <summary>A checksum over two runs of bytes that are not contiguous in memory.</summary>
+    public static uint Compute(ReadOnlySpan<byte> first, ReadOnlySpan<byte> second) =>
+        Finish(Update(Update(Seed, first), second));
+
+    /// <summary>Starting value for an incremental checksum; feed it through <see cref="Update"/>.</summary>
+    public const uint Seed = 0xFFFFFFFFu;
+
+    public static uint Update(uint crc, ReadOnlySpan<byte> data)
     {
-        var crc = 0xFFFFFFFFu;
         foreach (var b in data)
         {
             crc = (crc >> 8) ^ Table[(crc ^ b) & 0xFF];
         }
-        return crc ^ 0xFFFFFFFFu;
+        return crc;
     }
+
+    public static uint Finish(uint crc) => crc ^ 0xFFFFFFFFu;
 }

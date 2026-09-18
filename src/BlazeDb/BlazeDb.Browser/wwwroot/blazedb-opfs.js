@@ -3,34 +3,118 @@
 // createWritable() commits atomically on close() (the browser writes to a swap file),
 // which gives BlazeDb its atomic manifest/snapshot writes for free.
 
-const lockReleases = new Map();
+// Locks this document holds: name -> { release, clientId }. clientId is what navigator.locks.query()
+// reports for the holder, recorded at acquisition so a later query can tell "we still hold it" from
+// "another tab holds it now".
+const heldLocks = new Map();
+// Locks this document believed it held but can no longer vouch for. See revalidateLocks.
+const lostLocks = new Set();
 
-export async function acquireLock(lockName) {
+export function hasWebLocks() {
+  return !!navigator.locks;
+}
+
+// Resolves true when the lock was taken, false when another tab holds it. Without a Web Locks API
+// there is no election to win: the caller has to say explicitly that a single tab is assumed, or
+// the open fails - quietly proceeding would let two tabs on an old browser write the same files.
+export async function acquireLock(lockName, allowWithoutWebLocks) {
   if (!navigator.locks) {
-    // No Web Locks API (very old browser): proceed, single-tab usage assumed.
+    if (!allowWithoutWebLocks) {
+      return false;
+    }
+    heldLocks.set(lockName, { release: () => {}, clientId: null });
     return true;
   }
-  return await new Promise((resolve) => {
+  return await requestLock(lockName);
+}
+
+async function requestLock(lockName) {
+  const granted = await new Promise((resolve) => {
     navigator.locks.request(lockName, { ifAvailable: true }, (lock) => {
       if (lock === null) {
         resolve(false);
         return null;
       }
-      resolve(true);
-      // Hold the lock until releaseLock is called (or the tab goes away).
-      return new Promise((release) => {
-        lockReleases.set(lockName, release);
+      // Hold the lock until releaseLock is called (or the document goes away).
+      const holding = new Promise((release) => {
+        heldLocks.set(lockName, { release, clientId: null });
       });
+      resolve(true);
+      return holding;
     });
   });
+  if (granted) {
+    lostLocks.delete(lockName);
+    const entry = heldLocks.get(lockName);
+    if (entry) {
+      entry.clientId = await holderOf(lockName);
+    }
+  }
+  return granted;
+}
+
+async function holderOf(lockName) {
+  if (!navigator.locks.query) {
+    return null;
+  }
+  try {
+    const state = await navigator.locks.query();
+    const held = state.held.find((l) => l.name === lockName);
+    return held ? held.clientId : null;
+  } catch {
+    return null;
+  }
 }
 
 export function releaseLock(lockName) {
-  const release = lockReleases.get(lockName);
-  if (release) {
-    lockReleases.delete(lockName);
-    release();
+  lostLocks.delete(lockName);
+  const entry = heldLocks.get(lockName);
+  if (entry) {
+    heldLocks.delete(lockName);
+    entry.release();
   }
+}
+
+// Whether the document can still vouch for holding the lock. Checked before every write: data
+// written after the lock was lost could interleave with another tab's. Synchronous on purpose, so
+// the check costs the engine nothing measurable per flush.
+export function isLockHeld(lockName) {
+  return heldLocks.has(lockName) && !lostLocks.has(lockName);
+}
+
+// A document restored from the back/forward cache may have had its locks released while it was
+// frozen, and another tab may have taken over in the meantime. Ask the browser who holds each lock
+// now; where it is not us, try to take it back, and where that fails mark it lost so writes stop
+// instead of colliding with the new holder.
+async function revalidateLocks() {
+  if (!navigator.locks || heldLocks.size === 0) {
+    return;
+  }
+  for (const [lockName, entry] of [...heldLocks]) {
+    const holder = await holderOf(lockName);
+    if (holder !== null && entry.clientId !== null && holder === entry.clientId) {
+      continue; // Still ours.
+    }
+    if (holder === null) {
+      // Nobody holds it: the browser let go of ours. Take it again.
+      heldLocks.delete(lockName);
+      if (await requestLock(lockName)) {
+        continue;
+      }
+    }
+    lostLocks.add(lockName);
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) {
+      revalidateLocks();
+    }
+  });
+  document.addEventListener("resume", () => {
+    revalidateLocks();
+  });
 }
 
 export async function openDatabaseDirectory(databaseName) {
@@ -71,11 +155,28 @@ export function copyBytes(source, destination) {
   destination.set(source);
 }
 
+// Writes through a writable stream, aborting it when the write fails. A stream that is neither
+// closed nor aborted keeps its exclusive lock on the file, and every later write to that file -
+// the flusher's retries, a checkpoint - would fail until the tab was closed. Aborting also discards
+// the swap copy, so nothing half-written can become the file.
+async function writeStream(handle, options, chunk) {
+  const writable = await handle.createWritable(options);
+  try {
+    await writable.write(chunk);
+  } catch (error) {
+    try {
+      await writable.abort();
+    } catch {
+      // The original failure is the one worth reporting.
+    }
+    throw error;
+  }
+  await writable.close();
+}
+
 export async function writeAtomic(directory, name, bytes) {
   const handle = await directory.getFileHandle(name, { create: true });
-  const writable = await handle.createWritable();
-  await writable.write(bytes);
-  await writable.close();
+  await writeStream(handle, undefined, bytes);
 }
 
 // On the main thread the only writable API is createWritable(), which stages the whole file in a
@@ -85,9 +186,7 @@ export async function writeAtomic(directory, name, bytes) {
 export async function appendFile(directory, name, bytes) {
   const handle = await directory.getFileHandle(name, { create: true });
   const file = await handle.getFile();
-  const writable = await handle.createWritable({ keepExistingData: true });
-  await writable.write({ type: "write", position: file.size, data: bytes });
-  await writable.close();
+  await writeStream(handle, { keepExistingData: true }, { type: "write", position: file.size, data: bytes });
 }
 
 // { usage, quota } for this origin, or null when the browser does not implement estimate().

@@ -19,7 +19,8 @@ internal static class BlazeDbIndexSelector
         BlazeDbQueryPlan plan,
         IBlazeDbTableBinding binding,
         List<LambdaExpression> predicates,
-        List<MethodCallExpression> orderings)
+        List<MethodCallExpression> orderings,
+        bool useSecondaryIndexes = true)
     {
         if (predicates.Count == 0 && orderings.Count == 0)
         {
@@ -35,14 +36,14 @@ internal static class BlazeDbIndexSelector
         var used = new HashSet<int>();
         string? rangeMember = null;
 
-        if (!TryPrimaryKey(plan, binding, comparisons, used) &&
+        if (!TryPrimaryKey(plan, binding, comparisons, used) && useSecondaryIndexes &&
             !TryCompoundEquality(plan, binding, comparisons, used) &&
             !TrySingleEquality(plan, binding, comparisons, used))
         {
             rangeMember = TryRange(plan, binding, comparisons, used);
         }
 
-        var orderingSatisfied = TrySatisfyOrdering(plan, binding, orderings, rangeMember);
+        var orderingSatisfied = useSecondaryIndexes && TrySatisfyOrdering(plan, binding, orderings, rangeMember);
 
         return new BlazeDbIndexSelection(BlazeDbConjuncts.Rebuild(conjuncts, used, parameter, predicates), orderingSatisfied);
     }

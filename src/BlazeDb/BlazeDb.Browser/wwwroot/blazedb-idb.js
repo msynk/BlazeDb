@@ -23,6 +23,33 @@ export async function openDatabase(databaseName) {
   });
 }
 
+// Opens the database only if it already exists; resolves null otherwise. indexedDB.open() always
+// creates, so a first-time open is recognized by the upgrade it triggers and abandoned there - the
+// aborted upgrade leaves nothing behind. A replica tab uses this so it waits for the writer instead
+// of materializing an empty database of its own.
+export async function openExistingDatabase(databaseName) {
+  return await new Promise((resolve, reject) => {
+    const request = indexedDB.open("blazedb:" + databaseName);
+    let created = false;
+    request.onupgradeneeded = (event) => {
+      if (event.oldVersion === 0) {
+        created = true;
+        request.transaction.abort();
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = (event) => {
+      if (created) {
+        event.preventDefault();
+        resolve(null);
+        return;
+      }
+      reject(request.error);
+    };
+    request.onblocked = () => reject(new Error("IndexedDB upgrade blocked by another tab."));
+  });
+}
+
 function run(db, mode, action) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, mode);

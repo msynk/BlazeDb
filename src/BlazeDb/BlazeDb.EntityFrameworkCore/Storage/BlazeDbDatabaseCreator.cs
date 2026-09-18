@@ -27,17 +27,22 @@ internal sealed class BlazeDbDatabaseCreator : IDatabaseCreator
         _tables = tables;
     }
 
+    /// <summary>
+    /// Opens the store if no context has yet, and reports whether this call did the opening. That is
+    /// the contract callers rely on for <c>if (EnsureCreated()) Seed();</c>: true the first time a
+    /// store is brought up in this process, false for every context after that.
+    /// </summary>
     public bool EnsureCreated()
     {
+        _cache.GetOrCreate(Extension(), _model, out var created);
         _ = _tables.Database;
-        return false;
+        return created;
     }
 
     public async Task<bool> EnsureCreatedAsync(CancellationToken cancellationToken = default)
     {
-        var extension = Extension();
-        await _cache.GetOrCreateAsync(extension, _model, cancellationToken).ConfigureAwait(false);
-        return false;
+        var (_, created) = await _cache.GetOrCreateAsync(Extension(), _model, cancellationToken).ConfigureAwait(false);
+        return created;
     }
 
     public bool CanConnect() => _tables.Database is not null;
@@ -62,7 +67,9 @@ internal sealed class BlazeDbDatabaseCreator : IDatabaseCreator
         _tables.Reset();
         if (storage is not null)
         {
-            await WipeAsync(storage, cancellationToken).ConfigureAwait(false);
+            // The engine knows what it wrote; deleting only the manifest would leave a log the next
+            // open replays, bringing the deleted rows straight back.
+            await BlazeDbDatabase.DeleteAsync(storage, cancellationToken).ConfigureAwait(false);
         }
         return true;
     }
@@ -70,18 +77,4 @@ internal sealed class BlazeDbDatabaseCreator : IDatabaseCreator
     private BlazeDbOptionsExtension Extension() =>
         _options.FindExtension<BlazeDbOptionsExtension>()
         ?? throw new InvalidOperationException("No BlazeDb store was configured. Call optionsBuilder.UseBlazeDb().");
-
-    private static async Task WipeAsync(IBlazeDbStorage storage, CancellationToken cancellationToken)
-    {
-        if (storage is BlazeDbInMemoryStorage memory)
-        {
-            foreach (var name in memory.FileNames)
-            {
-                await storage.DeleteAsync(name, cancellationToken).ConfigureAwait(false);
-            }
-            return;
-        }
-
-        await storage.DeleteAsync("manifest.blz", cancellationToken).ConfigureAwait(false);
-    }
 }

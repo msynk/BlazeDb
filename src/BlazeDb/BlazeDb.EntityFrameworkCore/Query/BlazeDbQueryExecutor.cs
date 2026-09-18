@@ -32,27 +32,65 @@ internal sealed class BlazeDbQueryExecutor
         var binding = _tables.GetBinding(entityType);
 
         var translated = BlazeDbQueryTranslator.Translate(query, binding, entityType.ClrType);
-        var rows = binding.Execute(translated.Plan);
-
-        if (ShouldTrack(query, entityType, context, trackingOverride))
+        if (translated.Plan.HasIndexSource && !translated.Plan.UsesPrimaryKey && HasUnsavedChangesTo(entityType, context))
         {
-            rows = Track(rows, context);
+            // A tracked entity that has been modified but not saved has already changed the row in
+            // memory - the provider's contract - but its index entries still describe the old
+            // values until SaveChanges moves them. A lookup through those entries would then miss
+            // the row under its new value and return it under the one it no longer has, while a scan
+            // sees the object as it is. So while such changes are pending, the query reads the rows
+            // themselves; the predicates stay as filters and the ordering is done by sorting. (The
+            // primary key cannot be changed in place, so a key lookup stays exact.)
+            translated = BlazeDbQueryTranslator.Translate(query, binding, entityType.ClrType, useIndexes: false);
         }
+
+        var rows = binding.Execute(translated.Plan);
+        var track = ShouldTrack(query, entityType, context, trackingOverride);
 
         var queryable = binding.AsQueryable(rows);
         if (translated.Remainder is null)
         {
-            return queryable;
+            return track ? binding.AsQueryable(Track(rows, context)) : queryable;
         }
 
         var source = Expression.Constant(queryable, typeof(IQueryable<>).MakeGenericType(binding.RowType));
         var remainder = new BlazeDbRowsPlaceholderReplacer(source).Visit(translated.Remainder)!;
 
-        // A remainder that still describes a sequence has to be handed back as a query rather than
-        // run: LINQ to Objects only evaluates the operators that reduce one to a value.
-        return typeof(IQueryable).IsAssignableFrom(remainder.Type)
-            ? queryable.Provider.CreateQuery(remainder)
-            : queryable.Provider.Execute(remainder);
+        // Tracking wraps what comes out of the remainder, not what goes into it: Single(predicate)
+        // or Last walk every row the plan produced to find the one they return, and only that one
+        // belongs in the change tracker - the way any other provider behaves.
+        if (typeof(IQueryable).IsAssignableFrom(remainder.Type))
+        {
+            // A remainder that still describes a sequence has to be handed back as a query rather
+            // than run: LINQ to Objects only evaluates the operators that reduce one to a value.
+            var result = queryable.Provider.CreateQuery(remainder);
+            return track ? binding.AsQueryable(Track((IEnumerable<object>)result, context)) : result;
+        }
+
+        var value = queryable.Provider.Execute(remainder);
+        if (track && value is not null && entityType.ClrType.IsInstanceOfType(value))
+        {
+            Track(value, context);
+        }
+        return value;
+    }
+
+    /// <summary>
+    /// Whether the context holds a modified, unsaved entity of this type - the state in which the
+    /// table's secondary indexes lag the rows and cannot be trusted to answer a query about them.
+    /// Only consulted once a plan has actually chosen an index, so the detect-changes pass it costs
+    /// is paid for the queries that need it.
+    /// </summary>
+    private static bool HasUnsavedChangesTo(IEntityType entityType, DbContext context)
+    {
+        foreach (var entry in context.ChangeTracker.Entries())
+        {
+            if (entry.State == EntityState.Modified && entityType.ClrType.IsInstanceOfType(entry.Entity))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
@@ -121,14 +159,19 @@ internal sealed class BlazeDbQueryExecutor
     {
         foreach (var row in rows)
         {
-            var entry = context.Entry(row);
-            if (entry.State == EntityState.Detached)
-            {
-                // Unchanged, not Added: the row is already in the table, and this snapshots its
-                // current values as the originals a later SaveChanges compares against.
-                entry.State = EntityState.Unchanged;
-            }
+            Track(row, context);
             yield return row;
+        }
+    }
+
+    private static void Track(object row, DbContext context)
+    {
+        var entry = context.Entry(row);
+        if (entry.State == EntityState.Detached)
+        {
+            // Unchanged, not Added: the row is already in the table, and this snapshots its
+            // current values as the originals a later SaveChanges compares against.
+            entry.State = EntityState.Unchanged;
         }
     }
 }

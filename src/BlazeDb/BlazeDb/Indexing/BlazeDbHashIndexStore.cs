@@ -1,12 +1,19 @@
 namespace BlazeDb;
 
-// TIndexKey is intentionally unconstrained so nullable properties can be indexed;
-// null keys are filtered out before reaching the dictionary.
+// TIndexKey is intentionally unconstrained so nullable properties can be indexed; a null value
+// cannot be a dictionary key, so those rows go in a bucket of their own (see _nulls).
 #pragma warning disable CS8714
 internal sealed class BlazeDbHashIndexStore<TRow, TIndexKey> : IBlazeDbIndexStore<TRow>
 {
     private readonly BlazeDbHashIndexDefinition<TRow, TIndexKey> _definition;
     private readonly Dictionary<TIndexKey, Bucket> _buckets;
+
+    // Rows whose indexed value is null. Held apart from the dictionary rather than left out of the
+    // index altogether: an entry that does not exist cannot be retracted, and a row whose value was
+    // changed to null in place would strand the entry it had before - exactly what the table's
+    // in-place guard exists to catch, and what it could not see while nulls went unrecorded.
+    // Keeping them also lets an equality lookup for null answer from the index like any other value.
+    private readonly Bucket _nulls = new();
 
     public BlazeDbHashIndexStore(BlazeDbHashIndexDefinition<TRow, TIndexKey> definition)
     {
@@ -21,6 +28,7 @@ internal sealed class BlazeDbHashIndexStore<TRow, TIndexKey> : IBlazeDbIndexStor
         var key = _definition.Selector(row);
         if (key is null)
         {
+            _nulls.Add(seq, row);
             return;
         }
         if (!_buckets.TryGetValue(key, out var bucket))
@@ -35,6 +43,7 @@ internal sealed class BlazeDbHashIndexStore<TRow, TIndexKey> : IBlazeDbIndexStor
         var key = _definition.Selector(row);
         if (key is null)
         {
+            _nulls.Remove(seq);
             return;
         }
         if (_buckets.TryGetValue(key, out var bucket) && bucket.Remove(seq) && bucket.Count == 0)
@@ -43,7 +52,11 @@ internal sealed class BlazeDbHashIndexStore<TRow, TIndexKey> : IBlazeDbIndexStor
         }
     }
 
-    public void Clear() => _buckets.Clear();
+    public void Clear()
+    {
+        _buckets.Clear();
+        _nulls.Clear();
+    }
 
     public void ValidateUnique(TRow row, long replacedSeq, string tableName)
     {
@@ -52,6 +65,8 @@ internal sealed class BlazeDbHashIndexStore<TRow, TIndexKey> : IBlazeDbIndexStor
             return;
         }
         var key = _definition.Selector(row);
+        // Nulls are recorded but never conflict, which is how a unique index behaves in SQL: several
+        // rows may leave the value unset.
         if (key is null || !_buckets.TryGetValue(key, out var bucket))
         {
             return;
@@ -65,23 +80,17 @@ internal sealed class BlazeDbHashIndexStore<TRow, TIndexKey> : IBlazeDbIndexStor
     public bool EntryMatches(TRow row, long seq)
     {
         var key = _definition.Selector(row);
-        return key is null || (_buckets.TryGetValue(key, out var bucket) && bucket.Contains(seq));
+        return key is null ? _nulls.Contains(seq) : _buckets.TryGetValue(key, out var bucket) && bucket.Contains(seq);
     }
 
-    public IEnumerable<TRow> Lookup(TIndexKey key)
-    {
-        if (key is null)
-        {
-            return [];
-        }
-        // Resolved when enumeration starts, so an enumerable obtained before a write sees the table
-        // as it is when it is walked - the same deferred semantics as Scan and Range.
-        return LookupCore(key);
-    }
+    // Resolved when enumeration starts, so an enumerable obtained before a write sees the table as it
+    // is when it is walked - the same deferred semantics as Scan and Range.
+    public IEnumerable<TRow> Lookup(TIndexKey key) => LookupCore(key);
 
     private IEnumerable<TRow> LookupCore(TIndexKey key)
     {
-        if (!_buckets.TryGetValue(key, out var bucket))
+        var bucket = BucketFor(key);
+        if (bucket is null)
         {
             yield break;
         }
@@ -91,8 +100,10 @@ internal sealed class BlazeDbHashIndexStore<TRow, TIndexKey> : IBlazeDbIndexStor
         }
     }
 
-    public int CountOf(TIndexKey key) =>
-        key is not null && _buckets.TryGetValue(key, out var bucket) ? bucket.Count : 0;
+    public int CountOf(TIndexKey key) => BucketFor(key)?.Count ?? 0;
+
+    private Bucket? BucketFor(TIndexKey key) =>
+        key is null ? _nulls : _buckets.TryGetValue(key, out var bucket) ? bucket : null;
 
     public IEnumerable<TRow> LookupBoxed(object key) => Lookup((TIndexKey)key);
 
@@ -150,6 +161,12 @@ internal sealed class BlazeDbHashIndexStore<TRow, TIndexKey> : IBlazeDbIndexStor
 
         public bool Contains(long seq) =>
             _many is not null ? _many.ContainsKey(seq) : _hasInline && _seq == seq;
+
+        public void Clear()
+        {
+            _many = null;
+            (_hasInline, _row) = (false, default!);
+        }
 
         public bool HasEntryOtherThan(long seq)
         {

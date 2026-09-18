@@ -132,6 +132,25 @@ public class EncryptionTests
     }
 
     [Fact]
+    public async Task A_Damaged_Frame_Length_Is_Corruption_Not_A_Torn_Tail()
+    {
+        // The length sits outside the sealed body. Unchecked, a length damaged into something past
+        // the end of the file would look exactly like a crash mid-frame, and the frames behind it
+        // would be dropped without a word.
+        var inner = new BlazeDbInMemoryStorage();
+        using var storage = Wrap(inner);
+        await storage.AppendAsync("wal", "first"u8.ToArray());
+        await storage.AppendAsync("wal", "second"u8.ToArray());
+
+        // Frame layout: version(1) nonce(12) length(4) header crc(4) body. Inflate the first length.
+        var stored = (await inner.ReadAsync("wal"))!;
+        stored[1 + 12 + 2] = 0x7F;
+        await inner.WriteAtomicAsync("wal", stored);
+
+        await Assert.ThrowsAsync<BlazeDbCorruptDatabaseException>(async () => await storage.ReadAsync("wal"));
+    }
+
+    [Fact]
     public async Task A_Torn_Trailing_Frame_Is_Ignored()
     {
         var inner = new BlazeDbInMemoryStorage();

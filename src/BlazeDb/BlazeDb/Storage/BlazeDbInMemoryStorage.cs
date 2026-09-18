@@ -7,7 +7,7 @@ namespace BlazeDb.Storage;
 /// reopen a new BlazeDbDatabase over the same storage instance) and for ephemeral databases that
 /// still want the full persistence pipeline.
 /// </summary>
-public sealed class BlazeDbInMemoryStorage : IBlazeDbStorage
+public sealed class BlazeDbInMemoryStorage : IBlazeDbEnumerableStorage
 {
     private readonly object _lock = new();
 
@@ -53,6 +53,9 @@ public sealed class BlazeDbInMemoryStorage : IBlazeDbStorage
         }
         return default;
     }
+
+    public ValueTask<IReadOnlyCollection<string>> ListAsync(CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(FileNames);
 
     // ---- Test helpers ----
 

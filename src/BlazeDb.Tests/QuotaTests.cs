@@ -14,6 +14,14 @@ internal sealed class QuotaLimitedStorage : IBlazeDbQuotaAwareStorage
 
     public int EstimateCalls { get; private set; }
 
+    /// <summary>
+    /// When set, an append needs room for the whole file plus the new bytes, the way OPFS's swap
+    /// copy and IndexedDB's put-the-record-back do, and the backend tells the engine so.
+    /// </summary>
+    public bool RewritesOnAppend { get; set; }
+
+    public bool AppendRewritesWholeFile => RewritesOnAppend;
+
     public long UsageBytes
     {
         get
@@ -51,7 +59,7 @@ internal sealed class QuotaLimitedStorage : IBlazeDbQuotaAwareStorage
     {
         lock (_sizes)
         {
-            EnsureRoom(data.Length);
+            EnsureRoom(RewritesOnAppend ? _sizes.GetValueOrDefault(name) + data.Length : data.Length);
         }
         await _inner.AppendAsync(name, data, cancellationToken);
         lock (_sizes)
@@ -288,6 +296,47 @@ public class QuotaTests
         }.AddTable(TodoItem.Table));
         await using var owned2 = reopened;
         Assert.Equal(1, reopened.GetTable(TodoItem.Table).Count);
+    }
+
+    [Fact]
+    public async Task A_Backend_That_Rewrites_On_Append_Is_Charged_For_The_Whole_Log()
+    {
+        // The engine's preflight counted only the bytes being added, but OPFS and IndexedDB briefly
+        // need the log twice over. A log a little under the limit then passed the check and failed
+        // in the browser as a bare I/O error, never reaching the deliberate refusal or compaction.
+        var storage = new QuotaLimitedStorage { RewritesOnAppend = true };
+        var (db, todos) = await OpenAsync(storage, o => o.CheckpointWalSize = long.MaxValue);
+        await using var owned = db;
+
+        // One row rewritten many times: a log far larger than the snapshot it compacts to.
+        var id = Guid.NewGuid();
+        for (var i = 0; i < 150; i++)
+        {
+            todos.Upsert(new TodoItem { Id = id, Title = new string('y', 200) });
+            await db.FlushAsync();
+        }
+        var logSize = storage.UsageBytes;
+        Assert.True(logSize > 30_000, $"log was {logSize} bytes");
+
+        // Room for the log one and a half times over: a snapshot fits, a copy of the log does not.
+        storage.QuotaBytes = logSize + logSize / 2;
+        await db.GetStorageQuotaAsync();
+
+        // Appending one more record needs the log twice. With an open transaction compaction cannot
+        // run, so the only correct answer is a deliberate refusal - never a QuotaExceededError
+        // from the backend, which is what counting only the new bytes produced.
+        todos.Upsert(new TodoItem { Id = id, Title = "once more" });
+        using (var tx = db.BeginTransaction())
+        {
+            await Assert.ThrowsAsync<BlazeDbStorageQuotaExceededException>(async () => await db.FlushAsync());
+            tx.Rollback();
+        }
+
+        // Without the transaction the engine compacts the log into a snapshot and the flush lands.
+        await db.FlushAsync();
+        Assert.True(storage.UsageBytes < logSize / 2, $"usage after compaction was {storage.UsageBytes}");
+        Assert.Equal("once more", todos.Get(id)!.Title);
+        storage.QuotaBytes = long.MaxValue;
     }
 
     [Fact]

@@ -94,6 +94,14 @@ internal static class BlazeDbDiagnostics
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor MixedFieldNumbering = new(
+        "BLZ013",
+        "Table type mixes explicit and automatic field numbers",
+        "Type '{0}' gives some properties a [BlazeDbField] number and leaves '{1}' (and {2} more) to be numbered by declaration order. An automatic number moves whenever a property is added, removed or given an explicit number that it was using, and rows already on disk are then read into the wrong properties without an error. Number every property once the type persists data.",
+        Category,
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public static readonly DiagnosticDescriptor UnsupportedTypeShape = new(
         "BLZ007",
         "Unsupported table type shape",

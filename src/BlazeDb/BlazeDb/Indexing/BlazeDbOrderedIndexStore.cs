@@ -36,6 +36,15 @@ internal sealed class BlazeDbOrderedIndexStore<TRow, TIndexKey> : IBlazeDbIndexS
     private readonly BlazeDbOrderedIndexDefinition<TRow, TIndexKey> _definition;
     private readonly SortedSet<Entry> _entries;
 
+    // Rows whose indexed value is null, keyed by sequence number so they keep a stable order. They
+    // cannot live in the sorted set - a comparer given a null key is free to throw - but they are
+    // recorded rather than left out of the index altogether: an entry that does not exist cannot be
+    // retracted, so a row whose value was changed to null in place would strand the entry it had
+    // before, which is exactly what the table's in-place guard exists to catch. Walking the index in
+    // order also has to see them, because sorting by a value that is sometimes null still returns
+    // every row.
+    private readonly SortedDictionary<long, TRow> _nulls = new();
+
     public BlazeDbOrderedIndexStore(BlazeDbOrderedIndexDefinition<TRow, TIndexKey> definition)
     {
         _definition = definition;
@@ -49,6 +58,7 @@ internal sealed class BlazeDbOrderedIndexStore<TRow, TIndexKey> : IBlazeDbIndexS
         var key = _definition.Selector(row);
         if (key is null)
         {
+            _nulls[seq] = row;
             return;
         }
         _entries.Add(new Entry(key, seq, row));
@@ -59,12 +69,17 @@ internal sealed class BlazeDbOrderedIndexStore<TRow, TIndexKey> : IBlazeDbIndexS
         var key = _definition.Selector(row);
         if (key is null)
         {
+            _nulls.Remove(seq);
             return;
         }
         _entries.Remove(new Entry(key, seq, default));
     }
 
-    public void Clear() => _entries.Clear();
+    public void Clear()
+    {
+        _entries.Clear();
+        _nulls.Clear();
+    }
 
     public void ValidateUnique(TRow row, long replacedSeq, string tableName)
     {
@@ -73,6 +88,8 @@ internal sealed class BlazeDbOrderedIndexStore<TRow, TIndexKey> : IBlazeDbIndexS
             return;
         }
         var key = _definition.Selector(row);
+        // Nulls are recorded but never conflict, which is how a unique index behaves in SQL: several
+        // rows may leave the value unset.
         if (key is null || _entries.Count == 0)
         {
             return;
@@ -93,20 +110,40 @@ internal sealed class BlazeDbOrderedIndexStore<TRow, TIndexKey> : IBlazeDbIndexS
     public bool EntryMatches(TRow row, long seq)
     {
         var key = _definition.Selector(row);
-        return key is null || _entries.Contains(new Entry(key, seq, default));
+        return key is null ? _nulls.ContainsKey(seq) : _entries.Contains(new Entry(key, seq, default));
     }
 
-    /// <summary>All rows in index order (ascending or descending).</summary>
+    /// <summary>
+    /// All rows in index order (ascending or descending). Rows whose indexed value is null sort
+    /// before the rest, which is where <c>OrderBy</c> puts them, so walking the index answers an
+    /// ordering exactly as sorting the rows would.
+    /// </summary>
     public IEnumerable<TRow> All(bool descending)
     {
-        var source = descending ? _entries.Reverse() : _entries;
-        foreach (var entry in source)
+        if (!descending)
+        {
+            foreach (var row in _nulls.Values)
+            {
+                yield return row;
+            }
+        }
+        foreach (var entry in descending ? _entries.Reverse() : _entries)
         {
             yield return entry.Row!;
         }
+        if (descending)
+        {
+            foreach (var row in _nulls.Values.Reverse())
+            {
+                yield return row;
+            }
+        }
     }
 
-    /// <summary>Rows whose indexed value lies in the inclusive range [from, to].</summary>
+    /// <summary>
+    /// Rows whose indexed value lies in the inclusive range [from, to]. A null value is outside every
+    /// bounded range, matching a comparison against null in LINQ, so those rows are not returned.
+    /// </summary>
     public IEnumerable<TRow> Range(bool hasFrom, TIndexKey from, bool hasTo, TIndexKey to, bool descending)
     {
         if (_entries.Count == 0)

@@ -170,6 +170,14 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
             model.Props.Add(propModel);
         }
 
+        if (pendingAuto.Count > 0 && usedNumbers.Count > 0)
+        {
+            // Explicit numbers say the author cares about the wire format; the automatic ones beside
+            // them are the ones that will silently shift under it.
+            result.Diagnostics.Add(new BlazeDbDiagnosticInfo(
+                BlazeDbDiagnostics.MixedFieldNumbering, location, typeName, pendingAuto[0].Name, pendingAuto.Count - 1));
+        }
+
         var next = 1;
         foreach (var auto in pendingAuto)
         {

@@ -10,4 +10,13 @@ public interface IBlazeDbQuotaAwareStorage : IBlazeDbStorage
 {
     /// <summary>Current usage and allowance, or null when unavailable.</summary>
     ValueTask<BlazeDbStorageQuota?> GetQuotaAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Whether <see cref="IBlazeDbStorage.AppendAsync"/> rewrites the whole file instead of adding to
+    /// its end. Both browser backends do - OPFS stages the new contents in a swap copy, IndexedDB
+    /// puts the record back whole - so extending the log briefly needs room for the log twice over.
+    /// The engine charges that against the allowance, which is the difference between compacting
+    /// deliberately and discovering the limit as a failed write with the log already drained.
+    /// </summary>
+    bool AppendRewritesWholeFile => false;
 }

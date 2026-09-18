@@ -5,13 +5,16 @@ namespace BlazeDb.EntityFrameworkCore.Storage;
 internal sealed class BlazeDbEfTransaction : IDbContextTransaction
 {
     private readonly BlazeDbTransaction _transaction;
-    private readonly Action _onDisposed;
+    private readonly Action<bool> _onCompleted;
     private bool _completed;
+    private bool _rolledBack;
+    private bool _disposed;
 
-    public BlazeDbEfTransaction(BlazeDbTransaction transaction, Action onDisposed)
+    // onCompleted is called once, when the transaction is disposed, with whether it was rolled back.
+    public BlazeDbEfTransaction(BlazeDbTransaction transaction, Action<bool> onCompleted)
     {
         _transaction = transaction;
-        _onDisposed = onDisposed;
+        _onCompleted = onCompleted;
         TransactionId = Guid.NewGuid();
     }
 
@@ -37,6 +40,7 @@ internal sealed class BlazeDbEfTransaction : IDbContextTransaction
     {
         _transaction.Rollback();
         _completed = true;
+        _rolledBack = true;
     }
 
     public Task RollbackAsync(CancellationToken cancellationToken = default)
@@ -51,11 +55,19 @@ internal sealed class BlazeDbEfTransaction : IDbContextTransaction
 
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
         if (!_completed)
         {
+            // Disposing without committing is a rollback, as with every other provider.
             _transaction.Dispose();
+            _completed = true;
+            _rolledBack = true;
         }
-        _onDisposed();
+        _onCompleted(_rolledBack);
     }
 
     public ValueTask DisposeAsync()

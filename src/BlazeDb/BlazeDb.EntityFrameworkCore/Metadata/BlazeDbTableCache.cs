@@ -17,6 +17,7 @@ internal sealed class BlazeDbTableCache : IBlazeDbTableCache
     private readonly IModel _model;
     private readonly BlazeDbEngineCache _cache;
     private BlazeDbDatabase? _database;
+    private int _version;
     private ConcurrentDictionary<IEntityType, IBlazeDbTableBinding>? _bindings;
 
     public BlazeDbTableCache(IDbContextOptions options, IModel model, BlazeDbEngineCache cache)
@@ -30,24 +31,33 @@ internal sealed class BlazeDbTableCache : IBlazeDbTableCache
     {
         get
         {
-            if (_database is not null)
+            // The engine is looked up again once any store has been released: another context's
+            // EnsureDeleted disposes the engine this one cached, and queries against a disposed
+            // engine fail in ways that say nothing about why. A changed version costs a dictionary
+            // lookup; an unchanged one costs a compare.
+            if (_database is not null && _version == _cache.Version)
             {
                 return _database;
             }
 
             var extension = Extension();
-            _database = _cache.GetOrCreate(extension, _model);
+            _version = _cache.Version;
+            _database = _cache.GetOrCreate(extension, _model, out _);
             _bindings = Bindings.GetOrCreateValue(_database);
             return _database;
         }
     }
 
-    public IBlazeDbTableBinding GetBinding(IEntityType entityType) =>
-        (_bindings ?? Bindings.GetOrCreateValue(Database)).GetOrAdd(
+    public IBlazeDbTableBinding GetBinding(IEntityType entityType)
+    {
+        // Through the property, so the bindings are the current engine's and not those of one
+        // another context has since released.
+        var database = Database;
+        return _bindings!.GetOrAdd(
             entityType,
-            static (type, database) =>
-                BlazeDbTableResolver.CreateBinding(database, type),
-            Database);
+            static (type, database) => BlazeDbTableResolver.CreateBinding(database, type),
+            database);
+    }
 
     public void Reset()
     {

@@ -28,6 +28,21 @@ public class InPlaceWriteTests
         CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
     };
 
+    /// <summary>
+    /// The values a row has now, as a separate instance - what a change tracker's originals are. It
+    /// has to carry every indexed property: the table checks that these are the values its indexes
+    /// were built from before it retracts anything.
+    /// </summary>
+    private static Account Snapshot(Account row) => new()
+    {
+        Id = row.Id,
+        Username = row.Username,
+        TenantId = row.TenantId,
+        Email = row.Email,
+        CreatedAt = row.CreatedAt,
+        Slot = row.Slot,
+    };
+
     [Fact]
     public async Task An_In_Place_Update_Moves_The_Index_Entry()
     {
@@ -36,7 +51,7 @@ public class InPlaceWriteTests
         accounts.Insert(Make(1, tenant: 1));
 
         var row = accounts.Get(1)!;
-        var before = new Account { Id = row.Id, Username = row.Username, TenantId = row.TenantId, Email = row.Email };
+        var before = Snapshot(row);
         row.TenantId = 2;
         accounts.UpdateInPlace(row, before);
 
@@ -83,7 +98,7 @@ public class InPlaceWriteTests
         accounts.Insert(Make(2));
 
         var row = accounts.Get(2)!;
-        var before = new Account { Id = row.Id, Username = row.Username, TenantId = row.TenantId, Email = row.Email };
+        var before = Snapshot(row);
         row.Username = accounts.Get(1)!.Username;
 
         Assert.Throws<BlazeDbUniqueConstraintViolationException>(() => accounts.UpdateInPlace(row, before));
@@ -98,7 +113,7 @@ public class InPlaceWriteTests
         accounts.Insert(Make(2, tenant: 2));
 
         var row = accounts.Get(2)!;
-        var before = new Account { Id = row.Id, Username = row.Username, TenantId = row.TenantId, Email = row.Email };
+        var before = Snapshot(row);
         row.Username = accounts.Get(1)!.Username; // will be rejected
         row.TenantId = 1;
 
@@ -128,7 +143,7 @@ public class InPlaceWriteTests
         accounts.Insert(Make(1));
 
         var row = accounts.Get(1)!;
-        var before = new Account { Id = 1, Username = row.Username, TenantId = row.TenantId, Email = row.Email };
+        var before = Snapshot(row);
         row.Id = 99;
 
         Assert.Throws<KeyNotFoundException>(() => accounts.UpdateInPlace(row, before));
@@ -142,7 +157,7 @@ public class InPlaceWriteTests
         accounts.Insert(Make(1, tenant: 1));
 
         var row = accounts.Get(1)!;
-        var before = new Account { Id = row.Id, Username = row.Username, TenantId = row.TenantId, Email = row.Email };
+        var before = Snapshot(row);
         row.TenantId = 2;
         Assert.True(accounts.DeleteInPlace(1, before));
 
@@ -159,7 +174,7 @@ public class InPlaceWriteTests
         accounts.Insert(Make(1, tenant: 1));
 
         var row = accounts.Get(1)!;
-        var before = new Account { Id = row.Id, Username = row.Username, TenantId = 1, Email = row.Email };
+        var before = Snapshot(row);
         using (var transaction = db.BeginTransaction())
         {
             row.TenantId = 2;
@@ -171,6 +186,63 @@ public class InPlaceWriteTests
         Assert.Equal(1, accounts.Get(1)!.TenantId);
         Assert.Single(accounts.Lookup(Account.Indexes.TenantId, 1));
         Assert.Empty(accounts.Lookup(Account.Indexes.TenantId, 2));
+    }
+
+    [Fact]
+    public async Task Changing_An_Indexed_Value_To_Null_In_Place_Is_Caught_Like_Any_Other_Change()
+    {
+        // Nulls are recorded in the index like any other value, so the guard that refuses a plain
+        // Update or Delete of a mutated instance sees this change too - previously a value set to
+        // null slipped past it and left the old entry behind.
+        var (db, accounts) = await OpenAsync();
+        await using var owned = db;
+        var row = Make(1);
+        row.Slot = 7;
+        accounts.Insert(row);
+
+        row.Slot = null;
+        Assert.Throws<InvalidOperationException>(() => accounts.Update(row));
+        Assert.Throws<InvalidOperationException>(() => accounts.Delete(1));
+
+        // Told what the row used to hold, the table moves the entry properly: slot 7 is free again.
+        var before = Snapshot(row);
+        before.Slot = 7;
+        accounts.UpdateInPlace(row, before);
+        Assert.Empty(accounts.Range(Account.Indexes.Slot, BlazeDbBound<int?>.At(7), BlazeDbBound<int?>.At(7)));
+
+        var other = Make(2);
+        other.Slot = 7;
+        accounts.Insert(other);
+    }
+
+    [Fact]
+    public async Task Previous_Values_That_Do_Not_Match_The_Index_Are_Refused()
+    {
+        // Two change trackers sharing one live row each keep their own originals. Once the first
+        // has saved, the second's originals describe a state the index has moved past; applying
+        // them would retract nothing and add a second entry, so the row would come back twice.
+        var (db, accounts) = await OpenAsync();
+        await using var owned = db;
+        accounts.Insert(Make(1, tenant: 1));
+        var row = accounts.Get(1)!;
+
+        var firstOriginals = Snapshot(row);
+        var secondOriginals = Snapshot(row);
+
+        row.TenantId = 2;
+        accounts.UpdateInPlace(row, firstOriginals);
+
+        // The second tracker still believes TenantId was 1.
+        row.TenantId = 3;
+        var ex = Assert.Throws<BlazeDbStaleRowException>(() => accounts.UpdateInPlace(row, secondOriginals));
+        Assert.Equal("accounts", ex.TableName);
+
+        Assert.Throws<BlazeDbStaleRowException>(() => accounts.DeleteInPlace(1, secondOriginals));
+
+        // Nothing was disturbed: the index still describes the state the first save left.
+        Assert.Same(row, accounts.Lookup(Account.Indexes.TenantId, 2).Single());
+        Assert.Empty(accounts.Lookup(Account.Indexes.TenantId, 1));
+        Assert.Empty(accounts.Lookup(Account.Indexes.TenantId, 3));
     }
 
     [Fact]

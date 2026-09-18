@@ -208,6 +208,89 @@ public class ReplicaTests
         Assert.Empty(storage.Writes);
     }
 
+    [Fact]
+    public async Task A_Reload_That_Fails_Keeps_The_Rows_The_Replica_Had()
+    {
+        // Nothing is cleared until the newer generation has been read and checksummed, so a replica
+        // that cannot get at it goes on serving what it has instead of emptying itself.
+        var storage = new BlazeDbInMemoryStorage();
+        await using var writer = await OpenWriterAsync(storage);
+        writer.GetTable(TodoItem.Table).Insert(Make("kept"));
+        await writer.FlushAsync();
+        await using var replica = await OpenReplicaAsync(storage);
+        Assert.Equal(1, replica.GetTable(TodoItem.Table).Count);
+
+        await writer.CheckpointAsync();
+        var snapshot = storage.GetFile("snapshot-2.blz")!;
+        snapshot[^1] ^= 0xFF;
+        storage.SetFile("snapshot-2.blz", snapshot);
+
+        await Assert.ThrowsAsync<BlazeDbCorruptDatabaseException>(async () => await replica.ReloadAsync());
+
+        Assert.Equal("kept", replica.GetTable(TodoItem.Table).Scan().Single().Title);
+    }
+
+    [Fact]
+    public async Task A_Reload_Overlapping_A_Checkpoint_Reads_One_Whole_Generation()
+    {
+        // A checkpoint deletes the log the replica's manifest named while the replica is still
+        // reading. Finding it gone must not be mistaken for a log with nothing in it, which would
+        // silently drop every commit the older snapshot does not cover.
+        var gate = new TaskCompletionSource();
+        var storage = new GatedStorage();
+        await using var writer = await OpenWriterAsync(storage);
+        var todos = writer.GetTable(TodoItem.Table);
+
+        todos.Insert(Make("in the snapshot"));
+        await writer.FlushAsync();
+        await writer.CheckpointAsync();
+        todos.Insert(Make("only in the log"));
+        await writer.FlushAsync();
+
+        await using var replica = await OpenReplicaAsync(storage);
+        storage.BeforeRead = name => name.StartsWith("wal-") ? gate.Task : Task.CompletedTask;
+
+        // The replica reads the generation-2 manifest and snapshot, then stalls on wal-2 ...
+        var reload = replica.ReloadAsync().AsTask();
+        await Task.Delay(50);
+        Assert.False(reload.IsCompleted);
+
+        // ... while the writer moves everything into generation 3 and deletes wal-2.
+        todos.Insert(Make("after the checkpoint"));
+        await writer.FlushAsync();
+        await writer.CheckpointAsync();
+        gate.SetResult();
+        await reload;
+
+        Assert.Equal(3, replica.GetTable(TodoItem.Table).Count);
+    }
+
+    /// <summary>Lets a test hold a read open while the writer changes the files underneath it.</summary>
+    private sealed class GatedStorage : IBlazeDbStorage
+    {
+        private readonly BlazeDbInMemoryStorage _inner = new();
+
+        public Func<string, Task>? BeforeRead { get; set; }
+
+        public async ValueTask<byte[]?> ReadAsync(string name, CancellationToken cancellationToken = default)
+        {
+            if (BeforeRead is { } wait)
+            {
+                await wait(name);
+            }
+            return await _inner.ReadAsync(name, cancellationToken);
+        }
+
+        public ValueTask WriteAtomicAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) =>
+            _inner.WriteAtomicAsync(name, data, cancellationToken);
+
+        public ValueTask AppendAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) =>
+            _inner.AppendAsync(name, data, cancellationToken);
+
+        public ValueTask DeleteAsync(string name, CancellationToken cancellationToken = default) =>
+            _inner.DeleteAsync(name, cancellationToken);
+    }
+
     /// <summary>Records every mutating call so a test can assert a replica stays passive.</summary>
     private sealed class RecordingStorage : IBlazeDbStorage
     {

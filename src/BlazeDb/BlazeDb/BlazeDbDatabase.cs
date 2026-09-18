@@ -54,6 +54,17 @@ public sealed class BlazeDbDatabase : IAsyncDisposable
         return db;
     }
 
+    /// <summary>
+    /// Removes a database from a storage backend. Every file when the backend can list them (see
+    /// <see cref="IBlazeDbEnumerableStorage"/>), otherwise the manifest together with the snapshot
+    /// and log it names. No database may be open on the backend while this runs.
+    /// </summary>
+    public static ValueTask DeleteAsync(IBlazeDbStorage storage, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(storage);
+        return BlazeDbWalManager.DeleteAsync(storage, cancellationToken);
+    }
+
     /// <summary>True when this instance is a read-only replica and refuses all mutations.</summary>
     public bool IsReadOnly { get; private init; }
 
@@ -121,15 +132,28 @@ public sealed class BlazeDbDatabase : IAsyncDisposable
     /// Starts an explicit transaction. Only one can be active at a time (single-writer model);
     /// while active, every table write on this database becomes part of it.
     /// </summary>
-    public BlazeDbTransaction BeginTransaction()
+    public BlazeDbTransaction BeginTransaction() => BeginTransaction(owner: null);
+
+    /// <summary>
+    /// Starts a transaction and records who it belongs to. The EF Core provider passes its own
+    /// transaction manager, so a save made by a different context on the same store can tell that the
+    /// open transaction is not one it may join and commit into.
+    /// </summary>
+    internal BlazeDbTransaction BeginTransaction(object? owner)
     {
         CheckDisposed();
         CheckWritable();
-        if (_activeTransaction is not null)
+        // Under the lock so a transaction cannot open around a write another thread is part-way
+        // through, which would pull that write into it - and roll it back with it.
+        lock (SyncRoot)
         {
-            throw new InvalidOperationException("A transaction is already active; nested transactions are not supported.");
+            if (_activeTransaction is not null)
+            {
+                throw new InvalidOperationException("A transaction is already active; nested transactions are not supported.");
+            }
+            ActiveTransactionOwner = owner;
+            return _activeTransaction = new BlazeDbTransaction(this);
         }
-        return _activeTransaction = new BlazeDbTransaction(this);
     }
 
     /// <summary>
@@ -187,6 +211,9 @@ public sealed class BlazeDbDatabase : IAsyncDisposable
     // ---- Internals used by tables, transactions and the WAL manager ----
 
     internal bool HasActiveTransaction => _activeTransaction is not null;
+
+    /// <summary>What was passed to <see cref="BeginTransaction(object?)"/>, or null for one the application opened itself.</summary>
+    internal object? ActiveTransactionOwner { get; private set; }
 
     internal List<IBlazeDbTableInternal> TableList => _tableList;
 
@@ -263,6 +290,7 @@ public sealed class BlazeDbDatabase : IAsyncDisposable
                 _wal?.AppendCommit(transaction.Ops);
             }
             _activeTransaction = null;
+            ActiveTransactionOwner = null;
         }
     }
 
@@ -277,6 +305,7 @@ public sealed class BlazeDbDatabase : IAsyncDisposable
                 ops[i].Revert();
             }
             _activeTransaction = null;
+            ActiveTransactionOwner = null;
         }
     }
 

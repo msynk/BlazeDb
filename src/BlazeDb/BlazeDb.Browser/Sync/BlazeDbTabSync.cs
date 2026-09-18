@@ -99,12 +99,31 @@ public sealed class BlazeDbTabSync : IAsyncDisposable
     /// </summary>
     public Exception? LastError { get; private set; }
 
+    private bool _reloading;
+    private bool _reloadRequested;
+
+    /// <summary>
+    /// Reloads once per burst of announcements. A writer that checkpoints twice while the first
+    /// reload is still reading would otherwise start a second one on top of it; the reload itself
+    /// reads a whole generation before it touches the tables, so overlapping is safe, but one reload
+    /// that runs again afterwards is the same result for less work.
+    /// </summary>
     private async Task OnCheckpointAnnouncedAsync()
     {
+        _reloadRequested = true;
+        if (_reloading)
+        {
+            return;
+        }
+        _reloading = true;
         try
         {
-            await RefreshAsync().ConfigureAwait(false);
-            LastError = null;
+            while (_reloadRequested)
+            {
+                _reloadRequested = false;
+                await RefreshAsync().ConfigureAwait(false);
+                LastError = null;
+            }
         }
         catch (ObjectDisposedException)
         {
@@ -114,6 +133,10 @@ public sealed class BlazeDbTabSync : IAsyncDisposable
         {
             // Nothing awaits this task, so an exception here would be lost; keep it visible instead.
             LastError = ex;
+        }
+        finally
+        {
+            _reloading = false;
         }
     }
 

@@ -163,6 +163,81 @@ public class DurabilityTests
     }
 
     [Fact]
+    public async Task A_Partial_Append_Is_Cut_Off_Before_The_Retry_Lands_Behind_It()
+    {
+        // An append that fails part-way leaves a fragment on storage. The retry writes the whole
+        // record again; if it landed behind the fragment, replay would stop at the fragment and the
+        // next open would truncate the retry - and everything after it - away.
+        var storage = new PartialWriteStorage { FailAfterBytes = 10 };
+
+        var db = await OpenAsync(storage);
+        var people = db.GetTable(PersonTable.Descriptor);
+        people.Insert(new Person(1, "Ada", 36));
+        await Assert.ThrowsAsync<IOException>(async () => await db.FlushAsync());
+        Assert.Equal(10, storage.Inner.GetFile("wal-1.blz")!.Length);
+
+        storage.FailAfterBytes = null;
+        people.Insert(new Person(2, "Grace", 45));
+        await db.FlushAsync();
+        await db.DisposeAsync();
+
+        await using var reopened = await OpenAsync(storage);
+        Assert.Equal([1, 2], reopened.GetTable(PersonTable.Descriptor).Scan().Select(p => p.Id).Order());
+    }
+
+    /// <summary>An in-memory backend whose appends can be made to write a prefix and then fail.</summary>
+    private sealed class PartialWriteStorage : IBlazeDbStorage
+    {
+        public BlazeDbInMemoryStorage Inner { get; } = new();
+
+        public int? FailAfterBytes { get; set; }
+
+        public ValueTask<byte[]?> ReadAsync(string name, CancellationToken cancellationToken = default) =>
+            Inner.ReadAsync(name, cancellationToken);
+
+        public ValueTask WriteAtomicAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) =>
+            Inner.WriteAtomicAsync(name, data, cancellationToken);
+
+        public async ValueTask AppendAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
+        {
+            if (FailAfterBytes is { } prefix && prefix < data.Length)
+            {
+                await Inner.AppendAsync(name, data[..prefix], cancellationToken);
+                throw new IOException("Simulated disk-full part-way through the write.");
+            }
+            await Inner.AppendAsync(name, data, cancellationToken);
+        }
+
+        public ValueTask DeleteAsync(string name, CancellationToken cancellationToken = default) =>
+            Inner.DeleteAsync(name, cancellationToken);
+    }
+
+    [Fact]
+    public async Task A_Corrupted_Lsn_Stops_Replay_Rather_Than_Skipping_The_Commit()
+    {
+        // The LSN sits outside the payload; if it were outside the checksum too, an LSN damaged into
+        // something below the snapshot's would make replay skip that one commit and carry on - a
+        // hole in the middle of history with nothing to say so.
+        var storage = new BlazeDbInMemoryStorage();
+        await using (var db = await OpenAsync(storage))
+        {
+            db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "Ada", 36));
+            await db.FlushAsync();
+            db.GetTable(PersonTable.Descriptor).Insert(new Person(2, "Grace", 45));
+        }
+
+        // Record layout: magic(4) length(4) lsn(8) crc(4) payload. Zero the first record's LSN.
+        var wal = storage.GetFile("wal-1.blz")!;
+        Array.Clear(wal, 8, 8);
+        storage.SetFile("wal-1.blz", wal);
+
+        await using var reopened = await OpenAsync(storage);
+        var recovered = reopened.GetTable(PersonTable.Descriptor);
+        Assert.False(recovered.Contains(1));
+        Assert.False(recovered.Contains(2), "replay continued past a record whose header was damaged");
+    }
+
+    [Fact]
     public async Task Torn_Tail_Is_Discarded_And_Wal_Keeps_Working()
     {
         var storage = new BlazeDbInMemoryStorage();
@@ -366,9 +441,9 @@ public class DurabilityTests
         var directory = Path.Combine(Path.GetTempPath(), "blazedb-test-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var storage = new BlazeDbFileStorage(directory);
-            await using (var db = await OpenAsync(storage))
+            using (var storage = new BlazeDbFileStorage(directory))
             {
+                await using var db = await OpenAsync(storage);
                 var people = db.GetTable(PersonTable.Descriptor);
                 for (var i = 1; i <= 20; i++)
                 {
@@ -378,7 +453,8 @@ public class DurabilityTests
                 people.Insert(new Person(21, "After", 21));
             }
 
-            await using var reopened = await OpenAsync(new BlazeDbFileStorage(directory));
+            using var again = new BlazeDbFileStorage(directory);
+            await using var reopened = await OpenAsync(again);
             var recovered = reopened.GetTable(PersonTable.Descriptor);
             Assert.Equal(21, recovered.Count);
             Assert.Equal(new Person(21, "After", 21), recovered.Get(21));
@@ -387,6 +463,91 @@ public class DurabilityTests
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task FileStorage_Allows_One_Writer_And_Any_Number_Of_ReadOnly_Followers()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "blazedb-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // Nothing to follow yet: a replica waits for the writer rather than inventing a database.
+            Assert.Null(BlazeDbFileStorage.OpenReadOnly(directory));
+
+            using var writer = new BlazeDbFileStorage(directory);
+            Assert.Throws<BlazeDbDatabaseLockedException>(() => new BlazeDbFileStorage(directory));
+
+            await using var db = await OpenAsync(writer);
+            db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "Ada", 36));
+            await db.FlushAsync();
+
+            using var follower = BlazeDbFileStorage.OpenReadOnly(directory)!;
+            await Assert.ThrowsAsync<InvalidOperationException>(async () => await follower.AppendAsync("wal-1.blz", new byte[1]));
+            await using var replica = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
+            {
+                Storage = follower,
+                ReadOnly = true,
+                FlushInterval = Never,
+            }.AddTable(PersonTable.Descriptor));
+            Assert.Equal("Ada", replica.GetTable(PersonTable.Descriptor).Get(1)!.Name);
+
+            // Disposing the writer's storage frees the directory for the next writer.
+            await db.DisposeAsync();
+            writer.Dispose();
+            using var next = new BlazeDbFileStorage(directory);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Deleting_A_Database_Leaves_Nothing_For_The_Next_Open_To_Replay()
+    {
+        // Removing only the manifest is not a delete: recovery treats a missing manifest as a fresh
+        // database pointing at wal-1.blz and does not truncate that file, so the next open would
+        // replay the rows that were supposedly gone.
+        foreach (var enumerable in new[] { true, false })
+        {
+            var inner = new BlazeDbInMemoryStorage();
+            IBlazeDbStorage storage = enumerable ? inner : new OpaqueStorage(inner);
+
+            await using (var db = await OpenAsync(storage))
+            {
+                db.GetTable(PersonTable.Descriptor).Insert(new Person(1, "Ada", 36));
+                await db.CheckpointAsync();
+                db.GetTable(PersonTable.Descriptor).Insert(new Person(2, "Grace", 45));
+            }
+
+            await BlazeDbDatabase.DeleteAsync(storage);
+            Assert.Empty(inner.FileNames);
+
+            await using (var fresh = await OpenAsync(storage))
+            {
+                Assert.Equal(0, fresh.GetTable(PersonTable.Descriptor).Count);
+                fresh.GetTable(PersonTable.Descriptor).Insert(new Person(3, "Alan", 41));
+            }
+
+            await using var reopened = await OpenAsync(storage);
+            Assert.Equal([3], reopened.GetTable(PersonTable.Descriptor).Scan().Select(p => p.Id));
+        }
+    }
+
+    /// <summary>A backend that cannot list its files, so a delete has to go by what the manifest names.</summary>
+    private sealed class OpaqueStorage(BlazeDbInMemoryStorage inner) : IBlazeDbStorage
+    {
+        public ValueTask<byte[]?> ReadAsync(string name, CancellationToken cancellationToken = default) =>
+            inner.ReadAsync(name, cancellationToken);
+
+        public ValueTask WriteAtomicAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) =>
+            inner.WriteAtomicAsync(name, data, cancellationToken);
+
+        public ValueTask AppendAsync(string name, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) =>
+            inner.AppendAsync(name, data, cancellationToken);
+
+        public ValueTask DeleteAsync(string name, CancellationToken cancellationToken = default) =>
+            inner.DeleteAsync(name, cancellationToken);
     }
 
     [Fact]
