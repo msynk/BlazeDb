@@ -13,6 +13,5 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="BlazeDb.Tests/BlazeDb.Tests.csproj" />
-    <Project Path="BlazeDb.EntityFrameworkCore.Tests/BlazeDb.EntityFrameworkCore.Tests.csproj" />
   </Folder>
 </Solution>

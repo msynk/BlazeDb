@@ -28,100 +28,24 @@
 </Section>
 
 <Section Title="The EF Core provider" IconName="layers"
-         Lead="A milestone rather than a rewrite: the engine's query plan was designed as the provider's target from the start, so the provider is a translation layer and nothing more.">
-    <div class="grid grid-sidebar">
-        <Panel Title="How EF Core concepts land on the engine" IconName="schema" Flush="true">
-            <div class="table-wrap">
-                <table class="data">
-                    <thead>
-                        <tr><th>EF Core</th><th>BlazeDb</th><th>Notes</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td class="mono">DbContext</td>
-                            <td class="mono">BlazeDbDatabase</td>
-                            <td class="small muted">one instance, one write lock, tables from the model</td>
-                        </tr>
-                        <tr>
-                            <td class="mono">DbSet&lt;T&gt;</td>
-                            <td class="mono">BlazeDbTable&lt;TKey, TRow&gt;</td>
-                            <td class="small muted">entity type to descriptor, generated or model-driven</td>
-                        </tr>
-                        <tr>
-                            <td class="mono">SaveChanges</td>
-                            <td class="mono">BeginTransaction / Commit</td>
-                            <td class="small muted">change-tracker entries become one atomic batch</td>
-                        </tr>
-                        <tr>
-                            <td class="mono">Find(key)</td>
-                            <td class="mono">table.Get(key)</td>
-                            <td class="small muted">already O(1) with no materialisation step</td>
-                        </tr>
-                        <tr>
-                            <td class="mono">Where(x =&gt; x.Done)</td>
-                            <td class="mono">UseIndex(hash index)</td>
-                            <td class="small muted">equality on an indexed member becomes a lookup</td>
-                        </tr>
-                        <tr>
-                            <td class="mono">Where(x =&gt; x.At &gt;= a)</td>
-                            <td class="mono">UseIndex(ordered index)</td>
-                            <td class="small muted">comparisons become a range scan</td>
-                        </tr>
-                        <tr>
-                            <td class="mono">OrderBy / Skip / Take</td>
-                            <td class="mono">OrderBy / Skip / Take</td>
-                            <td class="small muted">already a 1:1 mapping on the plan</td>
-                        </tr>
-                        <tr>
-                            <td class="mono">Select / GroupBy / aggregates</td>
-                            <td>LINQ to Objects</td>
-                            <td class="small muted">runs over the rows the plan returned, at no extra cost</td>
-                        </tr>
-                        <tr>
-                            <td class="mono">Include / navigations</td>
-                            <td>-</td>
-                            <td class="small muted">not supported: rows are flat, relationships are key properties</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+         Lead="A translation layer, not a second database: UseBlazeDb points a DbContext at an open engine, LINQ becomes a query plan, and SaveChanges is one transaction.">
+    <div class="grid grid-2">
+        <Panel Title="What it is" IconName="schema">
+            <p class="small mb-2">
+                Entity types are the same <code>[BlazeDbTable]</code> classes the rest of the engine
+                uses. Queries hand back the live row, so tracking needs no materialisation step, and
+                a mutation is visible in memory before <code>SaveChanges</code> journals it.
+            </p>
+            <a class="btn btn-sm" href="efcore">
+                <Icon Name="arrow-right" /> Open the EF Core page
+            </a>
         </Panel>
-
-        <div class="flex-col gap-lg">
-            <Panel Title="SaveChanges is a memory operation" IconName="bolt">
-                <p class="small mb-0">
-                    It returns as soon as the transaction commits. The log reaches storage on the
-                    flush interval, or immediately if you ask for it - the same durability model
-                    every other write in the engine gets.
-                </p>
-            </Panel>
-            <Panel Title="What it looks like" IconName="code">
-                <CodeBlock ShowHeader="false" Code="@EfSnippet" />
-            </Panel>
-            <Callout Tone="warn" Title="A query returns the row, not a copy:">
-                mutating a tracked entity changes the database in memory straight away. SaveChanges
-                is what commits it as one transaction and one log record, and what moves the index
-                entries onto the new values.
-            </Callout>
-        </div>
+        <Callout Tone="warn" Title="A query returns the row, not a copy:">
+            mutating a tracked entity changes the database in memory straight away. SaveChanges
+            is what commits it as one transaction and one log record, and what moves the index
+            entries onto the new values.
+        </Callout>
     </div>
-
-    <Panel Title="Where the translation stops" IconName="query" Class="mt-3">
-        <p class="small mb-2">
-            The translator consumes the longest prefix of the operator chain that fits the plan -
-            filters, then ordering, then paging, in that order - and chooses an index from the
-            predicates and the sort. It stops as soon as the chain would change meaning:
-            <span class="mono">Take(2).Where(...)</span> is not
-            <span class="mono">Where(...).Take(2)</span>, so the filter is left behind. Everything
-            left over runs as LINQ to Objects over the rows the plan produced.
-        </p>
-        <p class="small mb-0">
-            In a relational provider that fallback is a disaster, because it means pulling rows over
-            a wire and filtering client-side. Here the rows are already managed objects in the same
-            heap, so the worst case is a delegate over an in-memory sequence - which is what the
-            fast path is too, minus the index.
-        </p>
-    </Panel>
 </Section>
 
 <Section Title="Planned" IconName="clock"
@@ -261,7 +185,7 @@
 
         new("EF Core provider", "layers", "BlazeDb.EntityFrameworkCore",
             "UseBlazeDb over an open database, entity types mapped to the generated descriptors, SaveChanges as one transaction, and LINQ translated onto the query plan with index selection. Queries hand back the live row, so tracking needs no materialization step.",
-            null, ""),
+            "efcore", "Run it against this database"),
     ];
 
     private static readonly Item[] NonGoals =
@@ -292,28 +216,9 @@
         new("BlazeDb.Browser", "OPFS and IndexedDB backends, Web Locks election, WebCrypto, cross-tab sync.", "shipped"),
         new("BlazeDb.EntityFrameworkCore", "The non-relational EF Core provider.", "shipped"),
         new("BlazeDb.Benchmarks", "BenchmarkDotNet suite, including comparisons against SQLite.", "shipped"),
-        new("BlazeDb.Tests", "Engine tests including crash recovery and torn writes.", "shipped"),
-        new("BlazeDb.EntityFrameworkCore.Tests", "Provider tests: saves, tracking, and the plans the translator produces.", "shipped"),
+        new("BlazeDb.Tests", "Engine and EF Core provider tests, including crash recovery, torn writes, tracking and query plans.", "shipped"),
         new("BlazeDb.Demo", "This site.", "shipped"),
     ];
-
-    private const string EfSnippet = """
-        public sealed class AppContext(DbContextOptions<AppContext> options) : DbContext(options)
-        {
-            public DbSet<TodoItem> Todos => Set<TodoItem>();
-        }
-
-        var context = new AppContext(new DbContextOptionsBuilder<AppContext>()
-            .UseBlazeDb(db).Options);
-
-        // A hash-index lookup, then a residual delegate, then a take -
-        // no scan, no SQL, no round trip.
-        var open = await context.Todos
-            .Where(t => !t.Done && t.Title.Contains("wal"))
-            .OrderByDescending(t => t.CreatedAt)
-            .Take(20)
-            .ToListAsync();
-        """;
 
     private const string BuildSnippet = """
         dotnet build src/BlazeDb.slnx

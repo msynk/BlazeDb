@@ -17,7 +17,7 @@
   <ItemGroup>
     <!-- The translator and the plan are the provider's interesting parts and are tested directly:
          from the outside an index lookup and a scan are indistinguishable. -->
-    <InternalsVisibleTo Include="BlazeDb.EntityFrameworkCore.Tests" />
+    <InternalsVisibleTo Include="BlazeDb.Tests" />
   </ItemGroup>
 
 </Project>

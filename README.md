@@ -33,8 +33,7 @@ BlazeDb eliminates all three:
 | `src/BlazeDb/BlazeDb.EntityFrameworkCore` | EF Core provider: `UseBlazeDb`, change tracking over live rows, LINQ translated to query plans. |
 | `src/BlazeDb.Benchmarks` | BenchmarkDotNet suite comparing against SQLite. |
 | `src/BlazeDb.Demo` | Blazor WASM app exercising persistence end-to-end in the browser. |
-| `src/BlazeDb.Tests` | Engine unit tests including crash-recovery and torn-write tests. |
-| `src/BlazeDb.EntityFrameworkCore.Tests` | Provider tests: CRUD, tracking, transactional saves, and the plans the translator produces. |
+| `src/BlazeDb.Tests` | Engine and EF Core provider tests, including crash recovery, torn writes, tracking and query plans. |
 
 The solution file (`src/BlazeDb.slnx`) and shared build settings (`src/Directory.Build.props`)
 also live under `src/`.
@@ -209,6 +208,8 @@ Objects over the rows the plan returned, which costs nothing extra because those
 objects. The exception is `Include`: BlazeDb rows have no navigations, so relationships are modelled
 as key properties and queried against the other table directly.
 
+The demo site walks through all of this against a live database at `/efcore`.
+
 ## Performance
 
 BenchmarkDotNet, .NET 10, 10,000-row table, vs native SQLite (in-memory, prepared statements).
@@ -240,13 +241,14 @@ in the browser rather than describing it.
 | `/schema` | Attributes, the generated descriptor inspected at runtime, supported types, diagnostics. |
 | `/indexes` | Hash lookups, ordered ranges, `BlazeDbBound<T>`, and indexed versus scanned counting. |
 | `/queries` | A query composer that shows the generated C#, the plan and the results. |
+| `/efcore` | The EF Core provider: `UseBlazeDb`, live LINQ, SaveChanges, and what the translator absorbs. |
 | `/transactions` | Commit, rollback, dispose-without-commit, nesting errors and crash-recovery proof. |
 | `/durability` | WAL, snapshots, checkpoints, and simulated crashes including torn tails and corruption. |
 | `/storage` | The `IBlazeDbStorage` contract, a live trace of engine I/O, OPFS and Web Locks notes. |
 | `/serialization` | Build a row and inspect the exact bytes, field by field, with a hex dump. |
 | `/errors` | Every exception the engine raises, triggered live against throwaway databases. |
 | `/bench` | Read, write and encoding benchmarks measured in your own browser. |
-| `/roadmap` | What ships, how the EF Core provider works, and the explicit non-goals. |
+| `/roadmap` | What ships, what never will, and how the repository is laid out. |
 
 ## Building
 

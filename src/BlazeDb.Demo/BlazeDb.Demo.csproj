@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\BlazeDb\BlazeDb.Core\BlazeDb.Core.csproj" />
     <ProjectReference Include="..\BlazeDb\BlazeDb.Browser\BlazeDb.Browser.csproj" />
+    <ProjectReference Include="..\BlazeDb\BlazeDb.EntityFrameworkCore\BlazeDb.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\BlazeDb\BlazeDb.SourceGen\BlazeDb.SourceGen.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />

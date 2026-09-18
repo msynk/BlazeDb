@@ -21,6 +21,9 @@ public static class SiteMap
         new("queries", "Query primitives", "query", "Engine",
             "Compose an index source, residual filters, ordering and paging without a query language."),
 
+        new("efcore", "EF Core", "layers", "Engine",
+            "UseBlazeDb, LINQ over live rows, SaveChanges as one transaction, and what the translator absorbs."),
+
         new("transactions", "Transactions", "txn", "Engine",
             "Ambient batches, atomic commit, rollback semantics and the single-writer rule."),
 
@@ -40,7 +43,7 @@ public static class SiteMap
             "Run the engine's read, write and encoding paths in your own browser and see what they cost."),
 
         new("roadmap", "Roadmap", "map", "Reference",
-            "Everything the engine does, how the EF Core provider maps onto it, and the explicit non-goals."),
+            "What ships, what never will, and how the repository is laid out."),
     ];
 
     public static readonly string[] Groups = ["Start", "Engine", "Persistence", "Reference"];
