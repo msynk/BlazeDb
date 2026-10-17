@@ -1,3 +1,5 @@
+**Note**: moved to bitplatform (https://blazedb.bitplatform.dev)
+
 # BlazeDb
 
 A memory-first, SQL-free embedded database engine for .NET, designed for Blazor WebAssembly
