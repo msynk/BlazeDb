@@ -53,6 +53,8 @@ public sealed class PeopleContext : DbContext
     public DbSet<Order> Orders => Set<Order>();
 
     public DbSet<Tag> Tags => Set<Tag>();
+
+    public DbSet<Note> Notes => Set<Note>();
 }
 
 /// <summary>A context that knows only part of the store, for sharing it with <see cref="PeopleContext"/>.</summary>
@@ -91,4 +93,27 @@ public partial class Tag
 
     [BlazeDbIgnore]
     public string Transient { get; set; } = "";
+}
+
+/// <summary>
+/// Collections and a blob: EF maps these as primitive collections, which the provider's type
+/// mapping has to carry without an element mapping of its own, and the change tracker snapshots
+/// them by value for the originals a save hands the engine.
+/// </summary>
+[BlazeDbTable("notes")]
+public partial class Note
+{
+    [BlazeDbKey]
+    public int Id { get; set; }
+
+    [BlazeDbIndex]
+    public int? Bucket { get; set; }
+
+    public List<string> Tags { get; set; } = [];
+
+    public int[] Scores { get; set; } = [];
+
+    public byte[] Payload { get; set; } = [];
+
+    public DateTimeOffset? DueAt { get; set; }
 }

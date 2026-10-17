@@ -10,8 +10,9 @@ internal sealed class BlazeDbQueryPlan<TRow> : BlazeDbQueryPlan
     private object? _primaryKey;
     private IReadOnlyList<object>? _primaryKeys;
     private BlazeDbIndex? _index;
+    private bool _hasEqualityKey;
     private object? _equalityKey;
-    private IReadOnlyList<object>? _equalityKeys;
+    private IReadOnlyList<object?>? _equalityKeys;
     private bool _hasFrom;
     private object? _from;
     private bool _hasTo;
@@ -36,15 +37,16 @@ internal sealed class BlazeDbQueryPlan<TRow> : BlazeDbQueryPlan
         IndexName = null;
     }
 
-    public override void UseEquality(BlazeDbIndex index, object key)
+    public override void UseEquality(BlazeDbIndex index, object? key)
     {
         _index = index;
+        _hasEqualityKey = true;
         _equalityKey = key;
         HasIndexSource = true;
         IndexName = index.Name;
     }
 
-    public override void UseEqualityIn(BlazeDbIndex index, IReadOnlyList<object> keys)
+    public override void UseEqualityIn(BlazeDbIndex index, IReadOnlyList<object?> keys)
     {
         _index = index;
         _equalityKeys = keys;
@@ -107,7 +109,7 @@ internal sealed class BlazeDbQueryPlan<TRow> : BlazeDbQueryPlan
         else if (_index is not null)
         {
             var definition = (BlazeDbIndexDefinition<TRow>)_index.Definition;
-            query = _equalityKey is not null ? query.UseIndexBoxed(definition, _equalityKey)
+            query = _hasEqualityKey ? query.UseIndexBoxed(definition, _equalityKey)
                 : _equalityKeys is not null ? query.UseIndexBoxed(definition, _equalityKeys)
                 : query.UseIndexBoxed(definition, _hasFrom, _from, _hasTo, _to, _descending);
         }

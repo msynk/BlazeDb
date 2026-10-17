@@ -153,7 +153,7 @@
             "errors", "Trigger every one"),
 
         new("Browser integration", "cpu", "BlazeDb.Browser",
-            "OPFS access through a [JSImport] ES module with synchronous access handles, plus Web Locks so a second tab cannot corrupt the first one's files.",
+            "OPFS access through a [JSImport] ES module - atomic writes through createWritable's swap file - plus Web Locks so a second tab cannot corrupt the first one's files.",
             "storage", "See the browser notes"),
 
         new("Unique constraints", "shield", "BlazeDb",

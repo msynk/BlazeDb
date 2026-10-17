@@ -23,9 +23,8 @@ internal interface IBlazeDbIndexStore<TRow>
     /// <summary>
     /// Whether the entry this store holds for <paramref name="seq"/> still matches the indexed
     /// value <paramref name="row"/> currently carries. False means the row instance was mutated
-    /// after it was indexed, so the entry can no longer be found through the row's own values.
-    /// Returns true when the current value is null, since null values are never indexed and there
-    /// is nothing to check against.
+    /// after it was indexed, so the entry can no longer be found through the row's own values. A
+    /// null value is recorded like any other, so a value changed to or from null is caught too.
     /// </summary>
     bool EntryMatches(TRow row, long seq);
 
@@ -33,9 +32,10 @@ internal interface IBlazeDbIndexStore<TRow>
     /// Equality lookup with the key passed as <see cref="object"/>. For callers that pick an index
     /// at runtime - the EF Core provider translating a LINQ predicate - and so cannot name the key
     /// type. The cast happens inside the already-instantiated generic store, so no reflection or
-    /// runtime code generation is involved.
+    /// runtime code generation is involved. A null key finds the rows whose indexed value is null;
+    /// the caller has to know that the index's key type can hold a null.
     /// </summary>
-    IEnumerable<TRow> LookupBoxed(object key);
+    IEnumerable<TRow> LookupBoxed(object? key);
 
     /// <summary>
     /// Range scan with boxed bounds; see <see cref="LookupBoxed"/>. Only ordered indexes support

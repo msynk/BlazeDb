@@ -225,7 +225,7 @@ else
     <div class="grid grid-2">
         <Panel Title="Absorbed into the plan" IconName="check">
             <ul class="ticks">
-                <li><code>Where</code> equalities on a key or hash index, including <code>ids.Contains(e.Id)</code>.</li>
+                <li><code>Where</code> equalities on a key or hash index, including <code>ids.Contains(e.Id)</code> and <code>e.Category == null</code>.</li>
                 <li><code>Where</code> ranges on an ordered index, with residual filters for exclusive bounds.</li>
                 <li>A compound index when several equalities match its members.</li>
                 <li><code>OrderBy</code> on an ordered index, which then supplies the order instead of sorting.</li>
@@ -235,10 +235,9 @@ else
         </Panel>
         <Panel Title="Left as LINQ to Objects" IconName="cpu">
             <ul class="ticks">
-                <li>Projections, grouping, joins against local sequences, aggregates.</li>
+                <li>Projections, grouping, aggregates, joins and subqueries - including ones over another <code>DbSet</code>, which is read as a scan.</li>
                 <li>A <code>Where</code> after a <code>Take</code> - that is not the same as filtering first.</li>
                 <li>A <code>Skip</code> after a <code>Take</code>, which reorders paging.</li>
-                <li>Null-valued equalities: nulls are not indexed, so they scan.</li>
                 <li>Anything else the plan cannot name. No query is rejected for being untranslatable.</li>
             </ul>
         </Panel>

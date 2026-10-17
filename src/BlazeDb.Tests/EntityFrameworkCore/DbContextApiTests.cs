@@ -233,4 +233,56 @@ public class DbContextApiTests
 
         public DbSet<Person> People => Set<Person>();
     }
+
+
+    [Fact]
+    public void The_Default_Store_Is_Named_After_The_Context_Type_Through_Every_Builder()
+    {
+        // AddDbContext and OnConfiguring hand out the non-generic builder, and AddDbContext builds
+        // its options once per scope: the name has to come from the options' context type, not
+        // from the overload or from a value made up per call.
+        var services = new ServiceCollection();
+        services.AddDbContext<DefaultStoreContext>(options => options.UseBlazeDb());
+        services.AddDbContext<OtherDefaultStoreContext>(options => options.UseBlazeDb(engine => engine.FlushInterval = TimeSpan.FromHours(1)));
+        using var provider = services.BuildServiceProvider();
+
+        using (var scope = provider.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<DefaultStoreContext>().Database.EnsureDeleted();
+            scope.ServiceProvider.GetRequiredService<OtherDefaultStoreContext>().Database.EnsureDeleted();
+        }
+
+        using (var scope = provider.CreateScope())
+        {
+            var first = scope.ServiceProvider.GetRequiredService<DefaultStoreContext>();
+            first.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36 });
+            first.SaveChanges();
+            var other = scope.ServiceProvider.GetRequiredService<OtherDefaultStoreContext>();
+            other.People.Add(new Person { Id = 2, Name = "Grace", City = "NYC", Age = 45 });
+            other.SaveChanges();
+        }
+
+        using (var scope = provider.CreateScope())
+        {
+            // The same type, a later scope: the same store. The generic builder agrees on the name.
+            Assert.Equal("Ada", scope.ServiceProvider.GetRequiredService<DefaultStoreContext>().People.Single().Name);
+            using var generic = new DefaultStoreContext(new DbContextOptionsBuilder<DefaultStoreContext>().UseBlazeDb().Options);
+            Assert.Equal("Ada", generic.People.Single().Name);
+
+            // A different type with the same default is a different store.
+            var other = scope.ServiceProvider.GetRequiredService<OtherDefaultStoreContext>();
+            Assert.Equal("Grace", other.People.Single().Name);
+            other.Database.EnsureDeleted();
+            generic.Database.EnsureDeleted();
+        }
+    }
+
+    private sealed class OtherDefaultStoreContext : DbContext
+    {
+        public OtherDefaultStoreContext(DbContextOptions<OtherDefaultStoreContext> options) : base(options)
+        {
+        }
+
+        public DbSet<Person> People => Set<Person>();
+    }
 }

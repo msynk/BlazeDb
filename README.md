@@ -264,7 +264,10 @@ context.SaveChanges();
 `UseBlazeDb()` with no arguments names the store after the context type, so every `AppContext`
 shares one engine. Pass a string to choose the name (`UseInMemoryDatabase` style), or an
 `IBlazeDbStorage` to persist. Tables are discovered from `DbSet` properties; there is no
-`OpenAsync` and no `AddTable` on this path.
+`OpenAsync` and no `AddTable` on this path. A store is identified by its name or its storage
+instance across the whole process - two contexts configured alike share one engine even when EF
+gives them separate internal service providers - so a persistent store never ends up with two
+writers.
 
 `OnConfiguring` works too:
 
@@ -310,12 +313,16 @@ is called, and `[BlazeDbIgnore]` keeps a property out of the entity type as well
 
 LINQ is translated as far as the engine's plan model reaches: a source chosen from the predicates -
 the primary-key dictionary for `Where(t => t.Id == id)`, `ids.Contains(t.Id)` and `Find(id)`, a
-compound or single-property index for equalities and `Contains` lists, an ordered index for ranges
-and `OrderBy` - then filters, ordering and paging.
-Everything else - projections, grouping, aggregates, joins between local sequences - runs as LINQ to
-Objects over the rows the plan returned, which costs nothing extra because those rows are already
-objects. The exception is `Include`: BlazeDb rows have no navigations, so relationships are modelled
-as key properties and queried against the other table directly.
+compound or single-property index for equalities (including `t.Category == null`) and `Contains`
+lists, an ordered index for ranges and `OrderBy` - then filters, ordering and paging.
+Everything else - projections, grouping, aggregates, joins and subqueries - runs as LINQ to Objects
+over the rows the plan returned, which costs nothing extra because those rows are already objects.
+A query may refer to other sets (`context.People.Where(p => context.Orders.Any(o => o.PersonId ==
+p.Id))`, a `join` between two sets); those are read as scans of their tables. Two things to know:
+an `OrderBy` on a string property that an ordered index answers comes back in ordinal order, since
+that is how the index sorts, where LINQ to Objects would use the current culture; and `Include` is
+refused, because BlazeDb rows have no navigations - relationships are modelled as key properties
+and queried against the other table directly.
 
 Because the provider replaces EF's query pipeline, it also replaces EF's compiled-query cache. The
 predicates and orderings a plan runs are compiled once per query *shape* and re-bound to the values
@@ -391,5 +398,10 @@ repository secret first.
 Field numbers identify properties in the binary format. Without `[BlazeDbField(n)]` they follow
 declaration order, so adding, removing or reordering a property renumbers the ones after it and
 rows already on disk decode into the wrong properties without an error. Pin every property's number
-before a type persists real data; the generator warns (`BLZ013`) when a type pins some numbers but
-not others, which is the case where an automatic number moves most easily.
+(1 to 536,870,911) before a type persists real data; the generator warns (`BLZ013`) when a type pins
+some numbers but not others, which is the case where an automatic number moves most easily.
+
+Collections (`List<T>`, `T[]`) and `byte[]` can be stored but not indexed, and a collection's element
+type has to be non-nullable: the wire format has no encoding for a null element, only for an absent
+field. The generator reports each of these as an error on the property rather than letting the
+generated code fail to compile or the index throw on its first insert.

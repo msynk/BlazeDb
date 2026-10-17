@@ -327,4 +327,27 @@ public class QueryTests
         Assert.Throws<ArgumentOutOfRangeException>(() => BlazeDbQuery<Guid, TodoItem>.From(todos).Skip(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => BlazeDbQuery<Guid, TodoItem>.From(todos).Take(-1));
     }
+
+
+    [Fact]
+    public async Task A_Boxed_Null_Lookup_Finds_The_Null_Rows_On_Either_Index_Kind()
+    {
+        // The EF Core provider reaches indexes through the boxed API with a key it only knows at
+        // runtime; a null there has to find the rows whose value is null on an ordered index as it
+        // does on a hash index, not an empty range between two nulls.
+        var db = await BlazeDbDatabase.OpenAsync(new BlazeDbDatabaseOptions
+        {
+            FlushInterval = TimeSpan.FromHours(1),
+        }.AddTable(Account.Table));
+        await using var _ = db;
+        var accounts = db.GetTable(Account.Table);
+        accounts.Insert(new Account { Id = 1, Username = "u1", Email = "u1@x", TenantId = 1, Slot = 5 });
+        accounts.Insert(new Account { Id = 2, Username = "u2", Email = "u2@x", TenantId = 1, Slot = null });
+
+        Assert.Equal([2], BlazeDbQuery<int, Account>.From(accounts).UseIndexBoxed(Account.Indexes.Slot, (object?)null).Execute(a => a.Id));
+        Assert.Equal([1], BlazeDbQuery<int, Account>.From(accounts).UseIndexBoxed(Account.Indexes.Slot, 5).Execute(a => a.Id));
+        Assert.Equal(
+            [1, 2],
+            BlazeDbQuery<int, Account>.From(accounts).UseIndexBoxed(Account.Indexes.Slot, new object?[] { 5, null }).Execute(a => a.Id).Order());
+    }
 }

@@ -2,7 +2,8 @@ namespace BlazeDb;
 
 /// <summary>
 /// Equality (hash) secondary index: O(1) lookup of all rows whose indexed value equals a key.
-/// Rows whose indexed value is null are not indexed.
+/// Rows whose indexed value is null are indexed under null like any other value, so a lookup for
+/// null finds them; a unique index still allows any number of them.
 /// </summary>
 public sealed class BlazeDbHashIndexDefinition<TRow, TIndexKey> : BlazeDbIndexDefinition<TRow>
 {

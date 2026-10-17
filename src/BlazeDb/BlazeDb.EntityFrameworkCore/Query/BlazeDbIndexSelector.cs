@@ -67,7 +67,8 @@ internal static class BlazeDbIndexSelector
                 }
                 if (membership)
                 {
-                    plan.UseKeys(comparison.InValues!);
+                    // No row has a null key, so a null in the list matches nothing and is dropped.
+                    plan.UseKeys(comparison.InValues!.Where(static key => key is not null).ToArray()!);
                 }
                 else if (comparison.Operator == ExpressionType.Equal && comparison.Value is not null)
                 {
@@ -91,12 +92,18 @@ internal static class BlazeDbIndexSelector
         foreach (var index in binding.Indexes.Where(i => i.Members.Count > 1).OrderByDescending(i => i.Members.Count))
         {
             var matched = new List<(int Index, BlazeDbComparison Comparison)>();
-            foreach (var member in index.Members)
+            // The tuple's element types say which members may be compared against null: a reference
+            // or Nullable<T> element can hold one, and the tuple then compares it as a value.
+            var elementTypes = index.KeyType.GetGenericArguments();
+            for (var position = 0; position < index.Members.Count; position++)
             {
+                var member = index.Members[position];
+                var nullable = position < elementTypes.Length && CanHoldNull(elementTypes[position]);
                 var match = comparisons.FirstOrDefault(c =>
                     c.Comparison!.Operator == ExpressionType.Equal &&
                     c.Comparison.Member == member &&
-                    c.Comparison.Value is not null &&
+                    !c.Comparison.IsMembership &&
+                    (c.Comparison.Value is not null || nullable) &&
                     !matched.Any(m => m.Index == c.Index));
                 if (match.Comparison is null)
                 {
@@ -130,7 +137,10 @@ internal static class BlazeDbIndexSelector
 
     /// <summary>
     /// A single-property equality, or a membership list, against a hash index - or an ordered one,
-    /// which answers equality as a range of one key, still far better than a scan.
+    /// which answers equality as a range of one key, still far better than a scan. A comparison
+    /// against null is answered by the index too, since it records the rows whose value is null -
+    /// provided the index's key type can hold a null at all. On a non-nullable property the
+    /// comparison is left as a filter, which correctly matches nothing.
     /// </summary>
     private static bool TrySingleEquality(
         BlazeDbQueryPlan plan, IBlazeDbTableBinding binding, List<(int Index, BlazeDbComparison? Comparison)> comparisons,
@@ -141,7 +151,7 @@ internal static class BlazeDbIndexSelector
             foreach (var (i, comparison) in comparisons)
             {
                 if (comparison!.IsMembership != membership ||
-                    (!membership && (comparison.Operator != ExpressionType.Equal || comparison.Value is null)))
+                    (!membership && comparison.Operator != ExpressionType.Equal))
                 {
                     continue;
                 }
@@ -151,13 +161,19 @@ internal static class BlazeDbIndexSelector
                 {
                     continue;
                 }
+                var nullable = CanHoldNull(index.KeyType);
                 if (membership)
                 {
-                    plan.UseEqualityIn(index, comparison.InValues!);
+                    // A null the index cannot hold matches no row, so it is simply left out.
+                    plan.UseEqualityIn(index, nullable ? comparison.InValues! : comparison.InValues!.Where(static key => key is not null).ToArray());
+                }
+                else if (comparison.Value is not null || nullable)
+                {
+                    plan.UseEquality(index, comparison.Value);
                 }
                 else
                 {
-                    plan.UseEquality(index, comparison.Value!);
+                    continue;
                 }
                 used.Add(i);
                 return true;
@@ -165,6 +181,8 @@ internal static class BlazeDbIndexSelector
         }
         return false;
     }
+
+    private static bool CanHoldNull(Type type) => !type.IsValueType || Nullable.GetUnderlyingType(type) is not null;
 
     /// <summary>Returns the member the chosen range covers, or null when no range was chosen.</summary>
     private static string? TryRange(

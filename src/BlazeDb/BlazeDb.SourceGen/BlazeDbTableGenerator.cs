@@ -89,7 +89,9 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
             TypeKeyword = symbol.IsRecord
                 ? (symbol.TypeKind == TypeKind.Struct ? "record struct" : "record")
                 : (symbol.TypeKind == TypeKind.Struct ? "struct" : "class"),
-            TableName = tableName ?? typeName,
+            // An empty name would fail the descriptor's constructor at type initialization, far
+            // from the attribute that caused it; "no name given" is what it means.
+            TableName = string.IsNullOrWhiteSpace(tableName) ? typeName : tableName!,
         };
         model.HintName = (model.Namespace is null ? "" : model.Namespace + ".") + typeName + ".BlazeDb.g.cs";
 
@@ -137,12 +139,10 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
 
             var indexAttr = FindAttribute(attrs, IndexAttributeName);
             var orderedAttr = FindAttribute(attrs, OrderedIndexAttributeName);
-            if ((indexAttr != null || orderedAttr != null) &&
-                propModel.Category is BlazeDbPropCategory.ListCollection or BlazeDbPropCategory.ArrayCollection)
+            if ((indexAttr != null || orderedAttr != null) && !IsIndexable(propModel))
             {
                 result.Diagnostics.Add(new BlazeDbDiagnosticInfo(
-                    BlazeDbDiagnostics.UnsupportedPropertyType, propLocation, typeName, prop.Name,
-                    prop.Type.ToDisplayString() + " (collections cannot be indexed)"));
+                    BlazeDbDiagnostics.UnindexableProperty, propLocation, typeName, prop.Name, prop.Type.ToDisplayString()));
                 continue;
             }
             propModel.HashIndexName = indexAttr is null ? null : GetIndexName(indexAttr) ?? prop.Name;
@@ -154,6 +154,14 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
             if (fieldAttr != null && fieldAttr.ConstructorArguments.Length > 0 &&
                 fieldAttr.ConstructorArguments[0].Value is int explicitNumber)
             {
+                if (explicitNumber < MinFieldNumber || explicitNumber > MaxFieldNumber)
+                {
+                    // The number is shifted into a varint tag alongside the wire type, so it has to
+                    // fit; and it names a local in the generated reader, so it cannot be negative.
+                    result.Diagnostics.Add(new BlazeDbDiagnosticInfo(
+                        BlazeDbDiagnostics.InvalidFieldNumber, propLocation, typeName, prop.Name, explicitNumber, MaxFieldNumber));
+                    continue;
+                }
                 if (!usedNumbers.Add(explicitNumber))
                 {
                     result.Diagnostics.Add(new BlazeDbDiagnosticInfo(
@@ -234,12 +242,27 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
             var resolved = true;
             foreach (var propName in propNames)
             {
-                var target = model.Props.FirstOrDefault(p =>
-                    p.Name == propName && p.Category is not (BlazeDbPropCategory.ListCollection or BlazeDbPropCategory.ArrayCollection));
+                var target = model.Props.FirstOrDefault(p => p.Name == propName);
                 if (target is null)
                 {
                     result.Diagnostics.Add(new BlazeDbDiagnosticInfo(
                         BlazeDbDiagnostics.CompoundIndexPropertyNotFound, location, name!, typeName, propName ?? "<null>"));
+                    resolved = false;
+                    break;
+                }
+                if (!IsIndexable(target))
+                {
+                    result.Diagnostics.Add(new BlazeDbDiagnosticInfo(
+                        BlazeDbDiagnostics.UnindexableProperty, location, typeName, target.Name, target.TypeDisplay));
+                    resolved = false;
+                    break;
+                }
+                if (compound.Props.Contains(target))
+                {
+                    // The index key is a value tuple named after its members, and a tuple cannot
+                    // name two elements the same - the generated code would not compile.
+                    result.Diagnostics.Add(new BlazeDbDiagnosticInfo(
+                        BlazeDbDiagnostics.CompoundIndexDuplicateProperty, location, name!, typeName, target.Name));
                     resolved = false;
                     break;
                 }
@@ -278,7 +301,9 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
             // An index name is emitted as a member of the generated Indexes class, so anything that
             // is not an identifier would surface as a syntax error in generated code instead of as
             // a diagnostic pointing at the attribute that caused it.
-            if (!SyntaxFacts.IsValidIdentifier(name))
+            // "Indexes" is the class the members go in, and a member cannot share its enclosing
+            // type's name (CS0542).
+            if (!SyntaxFacts.IsValidIdentifier(name) || name == "Indexes")
             {
                 result.Diagnostics.Add(new BlazeDbDiagnosticInfo(BlazeDbDiagnostics.InvalidIndexName, location, typeName, name));
                 valid = false;
@@ -326,6 +351,20 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
         return null;
     }
 
+    // Protobuf's range: the number shares a varint tag with the 3-bit wire type.
+    private const int MinFieldNumber = 1;
+    private const int MaxFieldNumber = (1 << 29) - 1;
+
+    /// <summary>
+    /// Whether an index can be keyed on the property. Collections have no single value to key on,
+    /// and a <c>byte[]</c> compares by reference under the default equality comparer and not at all
+    /// under the default ordering comparer, so an index over one would either never find its row
+    /// again or throw on the first insert.
+    /// </summary>
+    private static bool IsIndexable(BlazeDbPropModel prop) =>
+        prop.Category is not (BlazeDbPropCategory.ListCollection or BlazeDbPropCategory.ArrayCollection) &&
+        prop.Kind != BlazeDbScalarKind.ByteArray;
+
     private static BlazeDbPropModel? Categorize(ITypeSymbol type)
     {
         // Nullable<T> where T is a supported scalar.
@@ -360,11 +399,13 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
             };
         }
 
-        // Arrays and List<T> of scalars (byte[] was already handled as a scalar blob above).
+        // Arrays and List<T> of scalars (byte[] was already handled as a scalar blob above). The
+        // element type has to be non-nullable: the wire format has no encoding for a null element,
+        // only for an absent field, so a List<string?> holding a null could not be written.
         if (type is IArrayTypeSymbol array)
         {
             var elementKind = BlazeDbTypeMap.GetScalarKind(array.ElementType);
-            if (elementKind is null || elementKind == BlazeDbScalarKind.ByteArray)
+            if (elementKind is null || elementKind == BlazeDbScalarKind.ByteArray || IsNullableAnnotated(array.ElementType))
             {
                 return null;
             }
@@ -381,7 +422,7 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
             named.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.List<T>")
         {
             var elementKind = BlazeDbTypeMap.GetScalarKind(named.TypeArguments[0]);
-            if (elementKind is null || elementKind == BlazeDbScalarKind.ByteArray)
+            if (elementKind is null || elementKind == BlazeDbScalarKind.ByteArray || IsNullableAnnotated(named.TypeArguments[0]))
             {
                 return null;
             }
@@ -396,6 +437,9 @@ public sealed class BlazeDbTableGenerator : IIncrementalGenerator
 
         return null;
     }
+
+    private static bool IsNullableAnnotated(ITypeSymbol type) =>
+        type.IsReferenceType && type.NullableAnnotation == NullableAnnotation.Annotated;
 
     private static bool HasAttribute(System.Collections.Immutable.ImmutableArray<AttributeData> attrs, string fullName) =>
         FindAttribute(attrs, fullName) != null;

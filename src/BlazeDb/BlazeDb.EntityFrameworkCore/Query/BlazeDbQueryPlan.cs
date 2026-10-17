@@ -35,10 +35,14 @@ internal abstract class BlazeDbQueryPlan
     /// <summary>Sources the rows whose primary key is one of <paramref name="keys"/> (distinct, key-typed).</summary>
     public abstract void UseKeys(IReadOnlyList<object> keys);
 
-    public abstract void UseEquality(BlazeDbIndex index, object key);
+    /// <summary>
+    /// Sources the rows whose indexed value equals <paramref name="key"/>. A null key asks for the
+    /// rows whose value is null; the caller has checked that the index can hold one.
+    /// </summary>
+    public abstract void UseEquality(BlazeDbIndex index, object? key);
 
-    /// <summary>Sources the union of the index lookups for <paramref name="keys"/> (distinct, key-typed).</summary>
-    public abstract void UseEqualityIn(BlazeDbIndex index, IReadOnlyList<object> keys);
+    /// <summary>Sources the union of the index lookups for <paramref name="keys"/> (distinct, key-typed, null allowed as for <see cref="UseEquality"/>).</summary>
+    public abstract void UseEqualityIn(BlazeDbIndex index, IReadOnlyList<object?> keys);
 
     public abstract void UseRange(BlazeDbIndex index, bool hasFrom, object? from, bool hasTo, object? to, bool descending);
 

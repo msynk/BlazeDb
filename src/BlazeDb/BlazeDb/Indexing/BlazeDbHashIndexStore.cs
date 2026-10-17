@@ -105,7 +105,7 @@ internal sealed class BlazeDbHashIndexStore<TRow, TIndexKey> : IBlazeDbIndexStor
     private Bucket? BucketFor(TIndexKey key) =>
         key is null ? _nulls : _buckets.TryGetValue(key, out var bucket) ? bucket : null;
 
-    public IEnumerable<TRow> LookupBoxed(object key) => Lookup((TIndexKey)key);
+    public IEnumerable<TRow> LookupBoxed(object? key) => Lookup((TIndexKey)key!);
 
     public IEnumerable<TRow> RangeBoxed(bool hasFrom, object? from, bool hasTo, object? to, bool descending) =>
         throw new NotSupportedException(

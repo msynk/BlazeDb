@@ -2,7 +2,9 @@ namespace BlazeDb;
 
 /// <summary>
 /// Ordered secondary index: keeps rows sorted by the indexed value, enabling O(log n) range
-/// scans in both directions. Rows whose indexed value is null are not indexed.
+/// scans in both directions. Rows whose indexed value is null are recorded too: walking the index
+/// in order returns them first (where <c>OrderBy</c> puts them), while a bounded range excludes
+/// them, since null lies inside no interval.
 /// </summary>
 public sealed class BlazeDbOrderedIndexDefinition<TRow, TIndexKey> : BlazeDbIndexDefinition<TRow>
 {

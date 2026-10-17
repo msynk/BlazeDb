@@ -234,4 +234,36 @@ public class SaveChangesTests
         using var fresh = new PeopleContext(options);
         Assert.Equal("Ada", fresh.People.Single().Name);
     }
+
+    [Fact]
+    public void Collections_And_Blobs_Round_Trip_Through_The_Context()
+    {
+        using var test = TestDatabase.Open();
+        using var context = test.CreateContext();
+
+        context.Notes.Add(new Note
+        {
+            Id = 1,
+            Bucket = null,
+            Tags = ["a", "b"],
+            Scores = [3, 1, 2],
+            Payload = [0xDE, 0xAD],
+            DueAt = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.FromHours(2)),
+        });
+        context.SaveChanges();
+
+        var note = context.Notes.Single(n => n.Bucket == null);
+        note.Tags.Add("c");
+        note.Scores = [9];
+        note.Bucket = 4;
+        Assert.Equal(1, context.SaveChanges());
+
+        using var fresh = test.CreateContext();
+        var reloaded = fresh.Notes.Single(n => n.Bucket == 4);
+        Assert.Equal(["a", "b", "c"], reloaded.Tags);
+        Assert.Equal([9], reloaded.Scores);
+        Assert.Equal([0xDE, 0xAD], reloaded.Payload);
+        Assert.Equal(new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.FromHours(2)), reloaded.DueAt);
+        Assert.Empty(fresh.Notes.Where(n => n.Bucket == null).ToList());
+    }
 }

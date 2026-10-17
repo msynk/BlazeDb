@@ -99,11 +99,13 @@ else
             </Panel>
 
             <div class="flex-col gap-lg">
-                <Panel Title="Null keys are never indexed" IconName="alert">
+                <Panel Title="Null keys are indexed like any other" IconName="alert">
                     <p class="small">
-                        A row whose indexed property is <code>null</code> is left out of that index
-                        entirely. It is still in the table and still returned by <code>Scan</code> - it
-                        simply cannot be found through the index.
+                        A row whose indexed property is <code>null</code> is recorded in that index
+                        under null, so <code>Lookup(Category, null)</code> finds the uncategorised rows
+                        in one probe and an ordered index lists them first. Only a bounded
+                        <code>Range</code> leaves them out - null is inside no interval - and a unique
+                        index never counts them as duplicates.
                     </p>
                     <dl class="kv">
                         <dt>Rows in table</dt>
@@ -116,8 +118,8 @@ else
                         <dd>@_nullLookupCount rows</dd>
                     </dl>
                     <p class="tiny muted mb-0">
-                        This is why <code>CountBy</code> over every distinct key does not have to add up
-                        to <code>table.Count</code>.
+                        <code>CountBy</code> over the named categories plus the null bucket adds up to
+                        <code>table.Count</code>.
                     </p>
                 </Panel>
 
@@ -459,7 +461,7 @@ else
                     $"todos.Lookup(TodoEntry.Indexes.Category, {Literal(key)})\n" +
                     $"todos.CountBy(TodoEntry.Indexes.Category, {Literal(key)})";
                 _hashEmptyNote = key is null
-                    ? "Zero rows - null values are never added to an index."
+                    ? "No rows have a null category right now; null is a key like any other."
                     : "No rows for that key; a missing key is not an error.";
                 break;
 
@@ -628,7 +630,7 @@ else
     private void SandboxSetNull() => MutateFirst(
         row => row.Category = null,
         "Update - Category set to null",
-        "The row left the Category index completely. Scan still returns it.");
+        "The row moved from its category's bucket to the null bucket; Lookup(Category, null) now finds it.");
 
     private void MutateFirst(Action<TodoEntry> mutate, string title, string note)
     {

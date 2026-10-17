@@ -390,4 +390,62 @@ public class SharedStoreTests
         public ValueTask DeleteAsync(string name, CancellationToken cancellationToken = default) =>
             _inner.DeleteAsync(name, cancellationToken);
     }
+
+
+    [Fact]
+    public void A_Query_After_A_Failed_Save_Returns_The_Tracked_Entity_And_The_Retry_Succeeds()
+    {
+        // The failed save was rolled back, which put the earlier values back into the table as a
+        // separate instance. The tracker still holds the entity the application changed; a query
+        // must hand that one back - as every provider does for a key it already tracks - rather than
+        // fail over a second object with the same key, and the corrected retry must then land.
+        using var context = new PeopleContext(IsolatedOptions());
+        context.People.Add(new Person { Id = 1, Name = "Ada", City = "London", Age = 36, Email = "ada@x" });
+        context.People.Add(new Person { Id = 2, Name = "Grace", City = "NYC", Age = 45, Email = "grace@x" });
+        context.SaveChanges();
+
+        var ada = context.People.Single(p => p.Id == 1);
+        var grace = context.People.Single(p => p.Id == 2);
+        ada.City = "Paris";
+        grace.Email = "ada@x"; // Collides with Ada's unique email.
+        Assert.Throws<DbUpdateException>(() => context.SaveChanges());
+
+        // The database holds London again; the context holds Paris. The query answers for the context.
+        Assert.Equal("London", context.Database.GetBlazeDb().GetTable(Person.Table).Get(1)!.City);
+        Assert.Same(ada, context.People.Single(p => p.Id == 1));
+        Assert.Same(ada, context.People.OrderBy(p => p.Id).First());
+        Assert.Equal(2, context.People.ToList().Count);
+        Assert.Equal(2, context.ChangeTracker.Entries().Count());
+
+        grace.Email = "grace@y";
+        Assert.Equal(2, context.SaveChanges());
+        Assert.Same(ada, context.Database.GetBlazeDb().GetTable(Person.Table).Get(1));
+        Assert.Equal("Paris", context.People.Single(p => p.Id == 1).City);
+        Assert.Single(context.Database.GetBlazeDb().GetTable(Person.Table).Lookup(Person.Indexes.City, "Paris"));
+        Assert.Empty(context.Database.GetBlazeDb().GetTable(Person.Table).Lookup(Person.Indexes.City, "London"));
+    }
+
+    [Fact]
+    public void Disposing_A_Context_With_An_Open_Transaction_Rolls_It_Back()
+    {
+        // The engine allows one transaction at a time, so one left open by a context that went away
+        // would silently pull every later write on the store into a batch nobody can commit.
+        var options = IsolatedOptions();
+        var engine = new PeopleContext(options).Database.GetBlazeDb();
+
+        using (var abandoned = new PeopleContext(options))
+        {
+            abandoned.Database.BeginTransaction();
+            abandoned.People.Add(Ada());
+            abandoned.SaveChanges();
+            Assert.True(engine.HasActiveTransaction);
+        }
+
+        Assert.False(engine.HasActiveTransaction);
+        using var next = new PeopleContext(options);
+        Assert.Empty(next.People.ToList());
+        next.People.Add(Ada());
+        Assert.Equal(1, next.SaveChanges());
+        Assert.Equal("Ada", engine.GetTable(Person.Table).Get(1)!.Name);
+    }
 }

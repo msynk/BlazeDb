@@ -93,7 +93,7 @@ public sealed class BlazeDbTable<TKey, TRow> : IBlazeDbTableInternal
     /// <see cref="IBlazeDbIndexStore{TRow}.LookupBoxed"/> - this exists for the EF Core provider, which
     /// picks an index from a LINQ predicate and has no static knowledge of the key type.
     /// </summary>
-    internal IEnumerable<TRow> LookupBoxed(BlazeDbIndexDefinition<TRow> index, object key) =>
+    internal IEnumerable<TRow> LookupBoxed(BlazeDbIndexDefinition<TRow> index, object? key) =>
         GetIndexStore(index).LookupBoxed(key);
 
     /// <summary>Range scan against an index chosen at runtime. See <see cref="LookupBoxed"/>.</summary>

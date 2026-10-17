@@ -32,8 +32,9 @@ internal static class BlazeDbQueryPreparer
     /// <para>
     /// <c>values.Contains(row.Member)</c> on an array binds, since C# 14, to the span-based
     /// <c>MemoryExtensions.Contains</c> with an implicit array-to-span conversion in front of it,
-    /// even inside an expression tree. It is put back to <c>Enumerable.Contains</c> over the array,
-    /// which is what it means and what can be evaluated.
+    /// even inside an expression tree - with or without a comparer argument, depending on the
+    /// element type. It is put back to <c>Enumerable.Contains</c> over the array, which is what it
+    /// means and what can be evaluated.
     /// </para>
     /// </summary>
     private class Normalizer : ExpressionVisitor
@@ -58,13 +59,20 @@ internal static class BlazeDbQueryPreparer
             if (node.Method.DeclaringType == typeof(MemoryExtensions) &&
                 node.Method.Name == nameof(MemoryExtensions.Contains) &&
                 node.Method.IsGenericMethod &&
-                node.Arguments.Count == 2 &&
+                node.Arguments.Count is 2 or 3 &&
                 UnwrapSpanConversion(node.Arguments[0]) is { } source &&
                 source.Type.IsArray)
             {
+                // The three-argument form carries a comparer, which the compiler fills with null for
+                // element types that are not IEquatable<T> (a Nullable<T>, for one). Enumerable has
+                // the same two shapes; a null comparer is dropped so the call reads as the plain one.
                 var elementType = node.Method.GetGenericArguments()[0];
-                return Expression.Call(
-                    typeof(Enumerable), nameof(Enumerable.Contains), [elementType], Visit(source), Visit(node.Arguments[1]));
+                var arguments = new List<Expression> { Visit(source), Visit(node.Arguments[1]) };
+                if (node.Arguments.Count == 3 && node.Arguments[2] is not ConstantExpression { Value: null })
+                {
+                    arguments.Add(Visit(node.Arguments[2]));
+                }
+                return Expression.Call(typeof(Enumerable), nameof(Enumerable.Contains), [elementType], arguments.ToArray());
             }
 
             return base.VisitMethodCall(node);

@@ -13,8 +13,11 @@ public static class BlazeDbDbContextOptionsExtensions
     /// shares one engine - the usual <c>AddDbContext</c> shape. Pass an explicit name or a storage
     /// backend to choose a different store.
     /// </summary>
-    public static DbContextOptionsBuilder UseBlazeDb(this DbContextOptionsBuilder optionsBuilder) =>
-        UseBlazeDb(optionsBuilder, "BlazeDb");
+    public static DbContextOptionsBuilder UseBlazeDb(this DbContextOptionsBuilder optionsBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(optionsBuilder);
+        return UseBlazeDb(optionsBuilder, DefaultStoreName(optionsBuilder));
+    }
 
     /// <inheritdoc cref="UseBlazeDb(DbContextOptionsBuilder)"/>
     public static DbContextOptionsBuilder<TContext> UseBlazeDb<TContext>(this DbContextOptionsBuilder<TContext> optionsBuilder)
@@ -67,7 +70,10 @@ public static class BlazeDbDbContextOptionsExtensions
         {
             if (extension.DatabaseName is null && extension.Storage is null && extension.ExistingDatabase is null)
             {
-                extension = extension.WithDatabaseName("BlazeDb-" + Guid.NewGuid().ToString("N"));
+                // The same default as the parameterless overload. A name unique to this call would
+                // be a different store for every options instance - and AddDbContext builds its
+                // options once per scope, so every request would start from an empty database.
+                extension = extension.WithDatabaseName(DefaultStoreName(optionsBuilder));
             }
             return extension.WithConfigure(configure);
         });
@@ -123,6 +129,18 @@ public static class BlazeDbDbContextOptionsExtensions
         this DbContextOptionsBuilder<TContext> optionsBuilder, BlazeDb.BlazeDbDatabase database)
         where TContext : DbContext =>
         (DbContextOptionsBuilder<TContext>)UseBlazeDb((DbContextOptionsBuilder)optionsBuilder, database);
+
+    /// <summary>
+    /// The store a context type gets when no name is given: the type's full name, which is what the
+    /// options carry even through the non-generic builder <c>AddDbContext</c> and <c>OnConfiguring</c>
+    /// hand out. A plain <see cref="DbContext"/> built without options has no type to go by and
+    /// shares one store called "BlazeDb".
+    /// </summary>
+    private static string DefaultStoreName(DbContextOptionsBuilder optionsBuilder)
+    {
+        var contextType = optionsBuilder.Options.ContextType;
+        return contextType == typeof(DbContext) ? "BlazeDb" : contextType.FullName ?? contextType.Name;
+    }
 
     private static DbContextOptionsBuilder With(
         DbContextOptionsBuilder optionsBuilder, Func<BlazeDbOptionsExtension, BlazeDbOptionsExtension> with)

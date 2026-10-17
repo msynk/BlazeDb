@@ -11,11 +11,12 @@ namespace BlazeDb.EntityFrameworkCore.Storage;
 /// opened in this manager's name so a save from another context on the same store can tell it is
 /// not one it may join.
 /// </summary>
-internal sealed class BlazeDbTransactionManager : IDbContextTransactionManager
+internal sealed class BlazeDbTransactionManager : IDbContextTransactionManager, IDisposable
 {
     private readonly IBlazeDbTableCache _tables;
     private readonly ICurrentDbContext _currentContext;
     private BlazeDbEfTransaction? _current;
+    private bool _disposing;
 
     public BlazeDbTransactionManager(IBlazeDbTableCache tables, ICurrentDbContext currentContext)
     {
@@ -68,10 +69,24 @@ internal sealed class BlazeDbTransactionManager : IDbContextTransactionManager
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Disposing the context has to end a transaction it left open, as closing a connection would:
+    /// the engine allows one transaction at a time, and an abandoned one would swallow every later
+    /// write on the store into a batch nobody can commit. The service scope disposes this with the
+    /// context; the change tracker is gone by then, so the detaching a rollback normally does is
+    /// skipped.
+    /// </summary>
+    public void Dispose()
+    {
+        _disposing = true;
+        _current?.Dispose();
+        _current = null;
+    }
+
     private void OnCompleted(bool rolledBack)
     {
         _current = null;
-        if (rolledBack)
+        if (rolledBack && !_disposing)
         {
             ForgetSavedEntities();
         }

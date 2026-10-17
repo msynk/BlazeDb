@@ -12,7 +12,7 @@ namespace BlazeDb.EntityFrameworkCore.Query;
 /// </summary>
 internal sealed class BlazeDbComparison
 {
-    private BlazeDbComparison(string member, ExpressionType op, object? value, IReadOnlyList<object>? inValues = null)
+    private BlazeDbComparison(string member, ExpressionType op, object? value, IReadOnlyList<object?>? inValues = null)
     {
         Member = member;
         Operator = op;
@@ -28,8 +28,12 @@ internal sealed class BlazeDbComparison
     /// <summary>The value, of the member's type; null only for a comparison against null.</summary>
     public object? Value { get; }
 
-    /// <summary>For <c>values.Contains(row.Member)</c>: the distinct non-null values, of the member's type.</summary>
-    public IReadOnlyList<object>? InValues { get; }
+    /// <summary>
+    /// For <c>values.Contains(row.Member)</c>: the distinct values, of the member's type. A null in
+    /// the list is kept as a null: it matches the rows whose value is null, which an index over a
+    /// nullable property records, and matches nothing on a property that cannot be null.
+    /// </summary>
+    public IReadOnlyList<object?>? InValues { get; }
 
     public bool IsMembership => InValues is not null;
 
@@ -105,8 +109,6 @@ internal sealed class BlazeDbComparison
     /// <c>Contains</c> on a list, set or array - when the values do not depend on the row. A string
     /// receiver is left alone (<c>text.Contains(row.Letter)</c> is a substring test), and so is a set
     /// with its own comparer, which may match values an index keyed on the default comparer would not.
-    /// A null in the list would match rows whose value is null, which no index holds, so that too
-    /// stays a filter.
     /// </summary>
     private static BlazeDbComparison? TryReadMembership(MethodCallExpression call, ParameterExpression parameter)
     {
@@ -115,9 +117,15 @@ internal sealed class BlazeDbComparison
             return null;
         }
         Expression source, item;
-        if (call.Object is null && call.Arguments.Count == 2)
+        if (call.Object is null && call.Arguments.Count is 2 or 3)
         {
             (source, item) = (call.Arguments[0], call.Arguments[1]);
+            if (call.Arguments.Count == 3 &&
+                (!BlazeDbExpressionEvaluator.TryEvaluate(call.Arguments[2], out var comparer) || comparer is not null))
+            {
+                // An explicit comparer may match values the index would not; leave it to the filter.
+                return null;
+            }
         }
         else if (call.Object is not null && call.Arguments.Count == 1)
         {
@@ -136,11 +144,12 @@ internal sealed class BlazeDbComparison
             return null;
         }
 
-        var keys = new List<object>();
-        var seen = new HashSet<object>();
+        var keys = new List<object?>();
+        var seen = new HashSet<object?>();
         foreach (var value in values)
         {
-            if (!BlazeDbKeyCoercion.TryCoerce(value, memberType, out var key))
+            object? key = null;
+            if (value is not null && !BlazeDbKeyCoercion.TryCoerce(value, memberType, out key))
             {
                 return null;
             }
@@ -170,6 +179,10 @@ internal sealed class BlazeDbComparison
         if (elementType is null)
         {
             return true;
+        }
+        if (elementType == typeof(string) && ReferenceEquals(comparer, StringComparer.Ordinal))
+        {
+            return false; // Ordinal is what the default string comparers and the indexes already do.
         }
         var defaultEquality = typeof(EqualityComparer<>).MakeGenericType(elementType).GetProperty("Default")!.GetValue(null);
         var defaultOrder = typeof(Comparer<>).MakeGenericType(elementType).GetProperty("Default")!.GetValue(null);

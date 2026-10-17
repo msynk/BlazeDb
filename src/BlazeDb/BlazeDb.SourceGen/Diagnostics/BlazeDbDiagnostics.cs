@@ -89,7 +89,7 @@ internal static class BlazeDbDiagnostics
     public static readonly DiagnosticDescriptor InvalidIndexName = new(
         "BLZ011",
         "Index name must be a valid identifier",
-        "Index name '{1}' on type '{0}' is not a valid C# identifier; it becomes a member of the generated Indexes class",
+        "Index name '{1}' on type '{0}' cannot be a member of the generated Indexes class; it must be a valid C# identifier other than 'Indexes'",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -100,6 +100,30 @@ internal static class BlazeDbDiagnostics
         "Type '{0}' gives some properties a [BlazeDbField] number and leaves '{1}' (and {2} more) to be numbered by declaration order. An automatic number moves whenever a property is added, removed or given an explicit number that it was using, and rows already on disk are then read into the wrong properties without an error. Number every property once the type persists data.",
         Category,
         DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor InvalidFieldNumber = new(
+        "BLZ014",
+        "Field number out of range",
+        "Property '{0}.{1}' has field number {2}; [BlazeDbField] numbers must be between 1 and {3}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor UnindexableProperty = new(
+        "BLZ015",
+        "Property cannot be indexed",
+        "Property '{0}.{1}' cannot be indexed: its type ({2}) has no value equality or ordering to key an index on. Collections and byte[] can be stored but not indexed.",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor CompoundIndexDuplicateProperty = new(
+        "BLZ016",
+        "Compound index lists a property twice",
+        "Compound index '{0}' on type '{1}' lists property '{2}' more than once",
+        Category,
+        DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
     public static readonly DiagnosticDescriptor UnsupportedTypeShape = new(

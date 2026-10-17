@@ -87,7 +87,7 @@ public sealed class BlazeDbQuery<TKey, TRow>
     /// this after matching a LINQ predicate to an index, since it has no static knowledge of the
     /// index key type.
     /// </summary>
-    internal BlazeDbQuery<TKey, TRow> UseIndexBoxed(BlazeDbIndexDefinition<TRow> index, object key)
+    internal BlazeDbQuery<TKey, TRow> UseIndexBoxed(BlazeDbIndexDefinition<TRow> index, object? key)
     {
         EnsureNoSource();
         _source = () => _table.LookupBoxed(index, key);
@@ -97,9 +97,10 @@ public sealed class BlazeDbQuery<TKey, TRow>
     /// <summary>
     /// Sources the union of the lookups for several boxed keys against one index. Rows have one
     /// indexed value each, so the lookups are disjoint once the keys are distinct - which the caller
-    /// guarantees - and no row is produced twice.
+    /// guarantees - and no row is produced twice. A null key stands for the rows whose indexed value
+    /// is null.
     /// </summary>
-    internal BlazeDbQuery<TKey, TRow> UseIndexBoxed(BlazeDbIndexDefinition<TRow> index, IReadOnlyList<object> keys)
+    internal BlazeDbQuery<TKey, TRow> UseIndexBoxed(BlazeDbIndexDefinition<TRow> index, IReadOnlyList<object?> keys)
     {
         EnsureNoSource();
         var store = _table.GetIndexStore(index);
@@ -107,7 +108,7 @@ public sealed class BlazeDbQuery<TKey, TRow>
         return this;
     }
 
-    /// <summary>Ordered-index range scan with boxed bounds. See <see cref="UseIndexBoxed(BlazeDbIndexDefinition{TRow}, object)"/>.</summary>
+    /// <summary>Ordered-index range scan with boxed bounds. See <see cref="UseIndexBoxed(BlazeDbIndexDefinition{TRow}, object?)"/>.</summary>
     internal BlazeDbQuery<TKey, TRow> UseIndexBoxed(
         BlazeDbIndexDefinition<TRow> index, bool hasFrom, object? from, bool hasTo, object? to, bool descending)
     {

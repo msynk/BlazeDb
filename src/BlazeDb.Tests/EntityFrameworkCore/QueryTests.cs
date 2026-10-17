@@ -309,4 +309,63 @@ public class QueryTests
 
         Assert.Contains("no navigations", error.Message);
     }
+
+
+    [Fact]
+    public void A_Subquery_Over_Another_Set_Runs_Over_That_Tables_Rows()
+    {
+        using var test = Seeded();
+        test.Orders.Insert(new Order { Id = 10, PersonId = 1, Total = 5m });
+        test.Orders.Insert(new Order { Id = 11, PersonId = 3, Total = 7m });
+        using var context = test.CreateContext();
+
+        // The inner set has no plan of its own; it is bound to its table's rows and evaluated by
+        // LINQ to Objects inside the predicate, which is what a relational provider would turn
+        // into a correlated subquery.
+        var buyers = context.People
+            .Where(p => context.Orders.Any(o => o.PersonId == p.Id))
+            .Select(p => p.Name)
+            .Order()
+            .ToList();
+
+        Assert.Equal(["Ada", "Alan"], buyers);
+        Assert.Equal(12m, context.People.Where(p => p.City == "London").Sum(p => context.Orders.Where(o => o.PersonId == p.Id).Sum(o => o.Total)));
+    }
+
+    [Fact]
+    public void A_Join_Between_Two_Sets_Works()
+    {
+        using var test = Seeded();
+        test.Orders.Insert(new Order { Id = 10, PersonId = 1, Total = 5m });
+        test.Orders.Insert(new Order { Id = 11, PersonId = 1, Total = 6m });
+        test.Orders.Insert(new Order { Id = 12, PersonId = 2, Total = 7m });
+        using var context = test.CreateContext();
+
+        var totals = (
+            from p in context.People
+            join o in context.Orders on p.Id equals o.PersonId
+            group o by p.Name into g
+            orderby g.Key
+            select new { Name = g.Key, Total = g.Sum(o => o.Total) }).ToList();
+
+        Assert.Equal(["Ada", "Grace"], totals.Select(t => t.Name));
+        Assert.Equal([11m, 7m], totals.Select(t => t.Total));
+
+        // The query is still rooted at - and planned for - the first set.
+        var alan = context.People.Where(p => p.Id == 3).SelectMany(p => context.Orders.Where(o => o.PersonId == p.Id)).ToList();
+        Assert.Empty(alan);
+    }
+
+    [Fact]
+    public void A_Query_Not_Rooted_At_A_Set_Is_Refused_With_An_Explanation()
+    {
+        using var test = Seeded();
+        using var context = test.CreateContext();
+
+        var local = new[] { 1, 2 }.AsQueryable();
+        var error = Assert.Throws<NotSupportedException>(() =>
+            ((IQueryable)context.People).Provider.Execute<int>(local.Select(x => x + 1).Expression));
+
+        Assert.Contains("DbSet", error.Message);
+    }
 }

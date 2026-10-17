@@ -8,6 +8,14 @@ namespace BlazeDb.EntityFrameworkCore.Infrastructure;
 /// Holds opened engines keyed by store identity so scoped contexts share one in-memory dataset,
 /// the way a SQLite file outlives any one connection.
 /// <para>
+/// There is one cache per process, not one per EF service provider. EF builds a separate internal
+/// provider for options that differ in ways unrelated to the store - a context from
+/// <c>AddDbContext</c> and one built by hand, say - and a cache per provider would open a second
+/// engine on the same store: a second copy of an in-memory database, or worse, a second writer and
+/// flusher on one persistent log. The store's identity is the name or the storage instance, and
+/// neither belongs to any one provider.
+/// </para>
+/// <para>
 /// Each store has its own gate, held for the whole of an open: two contexts racing to be first -
 /// an <c>EnsureCreatedAsync</c> overlapping a synchronous first query, say - must not both recover
 /// the same storage, which would put two engines and two flushers on one log. The loser waits and
@@ -16,6 +24,9 @@ namespace BlazeDb.EntityFrameworkCore.Infrastructure;
 /// </summary>
 internal sealed class BlazeDbEngineCache
 {
+    /// <summary>The process-wide cache every provider instance resolves.</summary>
+    public static BlazeDbEngineCache Shared { get; } = new();
+
     private readonly Dictionary<object, Slot> _slots = [];
     private readonly object _gate = new();
     private int _version;

@@ -43,7 +43,9 @@ public static class BlazeDbServiceCollectionExtensions
             .TryAdd<IValueGeneratorSelector, ValueGeneratorSelector>()
             .TryAddProviderSpecificServices(b =>
             {
-                b.TryAddSingleton<BlazeDbEngineCache, BlazeDbEngineCache>();
+                // One cache for the process, whatever internal service provider EF builds for a
+                // given set of options; see BlazeDbEngineCache.
+                b.TryAddSingleton(BlazeDbEngineCache.Shared);
                 b.TryAddScoped<IBlazeDbTableCache, BlazeDbTableCache>();
             })
             .TryAddCoreServices();

@@ -166,8 +166,10 @@ internal sealed class BlazeDbOrderedIndexStore<TRow, TIndexKey> : IBlazeDbIndexS
         }
     }
 
-    public IEnumerable<TRow> LookupBoxed(object key) =>
-        Range(true, (TIndexKey)key, true, (TIndexKey)key, descending: false);
+    public IEnumerable<TRow> LookupBoxed(object? key) =>
+        // Nulls live outside the sorted set, so a range of [null, null] would find nothing; answer
+        // from the bucket that holds them, the way the hash index does.
+        key is null ? _nulls.Values : Range(true, (TIndexKey)key, true, (TIndexKey)key, descending: false);
 
     public IEnumerable<TRow> RangeBoxed(bool hasFrom, object? from, bool hasTo, object? to, bool descending) =>
         hasFrom || hasTo

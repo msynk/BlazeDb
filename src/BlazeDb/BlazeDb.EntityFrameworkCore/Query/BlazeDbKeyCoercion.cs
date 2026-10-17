@@ -17,8 +17,8 @@ internal static class BlazeDbKeyCoercion
         result = null!;
         if (value is null)
         {
-            // Nulls are never indexed, so a null key can only ever match nothing; leave the
-            // comparison as a residual filter, which yields the right (empty) answer.
+            // There is nothing to convert. Whether a null can be looked up depends on the index it
+            // is aimed at - its key type has to be able to hold one - which is the selector's call.
             return false;
         }
 

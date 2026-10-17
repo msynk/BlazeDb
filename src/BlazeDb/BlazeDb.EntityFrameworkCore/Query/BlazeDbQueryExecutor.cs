@@ -31,6 +31,12 @@ internal sealed class BlazeDbQueryExecutor
         var entityType = root.EntityType;
         var binding = _tables.GetBinding(entityType);
 
+        // Any other set the query mentions - the inner side of a join, a subquery inside a Where -
+        // is bound to its table's rows here, so the rest of the pipeline only ever sees one query
+        // root. Those rows are a scan: the plan is chosen for the root set alone, and the inner
+        // ones run as LINQ to Objects, which is what they would be left to anyway.
+        query = BlazeDbQueryRootBinder.BindOtherSets(query, BindSet);
+
         var translated = BlazeDbQueryTranslator.Translate(query, binding, entityType.ClrType);
         if (translated.Plan.HasIndexSource && !translated.Plan.UsesPrimaryKey && HasUnsavedChangesTo(entityType, context))
         {
@@ -51,7 +57,7 @@ internal sealed class BlazeDbQueryExecutor
         var queryable = binding.AsQueryable(rows);
         if (translated.Remainder is null)
         {
-            return track ? binding.AsQueryable(Track(rows, context)) : queryable;
+            return track ? binding.AsQueryable(Track(rows, entityType, context)) : queryable;
         }
 
         var source = Expression.Constant(queryable, typeof(IQueryable<>).MakeGenericType(binding.RowType));
@@ -65,15 +71,22 @@ internal sealed class BlazeDbQueryExecutor
             // A remainder that still describes a sequence has to be handed back as a query rather
             // than run: LINQ to Objects only evaluates the operators that reduce one to a value.
             var result = queryable.Provider.CreateQuery(remainder);
-            return track ? binding.AsQueryable(Track((IEnumerable<object>)result, context)) : result;
+            return track ? binding.AsQueryable(Track((IEnumerable<object>)result, entityType, context)) : result;
         }
 
         var value = queryable.Provider.Execute(remainder);
         if (track && value is not null && entityType.ClrType.IsInstanceOfType(value))
         {
-            Track(value, context);
+            value = BlazeDbEntityTracker.Track(value, entityType, context);
         }
         return value;
+    }
+
+    /// <summary>A queryable over every row of another set's table, read when it is enumerated.</summary>
+    private Expression BindSet(EntityQueryRootExpression root)
+    {
+        var binding = _tables.GetBinding(root.EntityType);
+        return Expression.Constant(binding.AsQueryable(binding.Execute(binding.CreatePlan())), root.Type);
     }
 
     /// <summary>
@@ -156,23 +169,16 @@ internal sealed class BlazeDbQueryExecutor
         return type;
     }
 
-    private static IEnumerable<object> Track(IEnumerable<object> rows, DbContext context)
+    /// <summary>
+    /// Tracks each row as it goes by, yielding the instance the context tracks for that key - which
+    /// is the row itself unless the context already holds another object with the same key (see
+    /// <see cref="BlazeDbEntityTracker"/>).
+    /// </summary>
+    private static IEnumerable<object> Track(IEnumerable<object> rows, IEntityType entityType, DbContext context)
     {
         foreach (var row in rows)
         {
-            Track(row, context);
-            yield return row;
-        }
-    }
-
-    private static void Track(object row, DbContext context)
-    {
-        var entry = context.Entry(row);
-        if (entry.State == EntityState.Detached)
-        {
-            // Unchanged, not Added: the row is already in the table, and this snapshots its
-            // current values as the originals a later SaveChanges compares against.
-            entry.State = EntityState.Unchanged;
+            yield return BlazeDbEntityTracker.Track(row, entityType, context);
         }
     }
 }

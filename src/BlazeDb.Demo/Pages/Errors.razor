@@ -74,9 +74,9 @@
         <Panel Title="Null index keys" IconName="key">
             <CodeBlock ShowHeader="false" Code="@NullIndexSnippet" />
             <p class="small mt-2 mb-0">
-                Rows whose indexed value is null are simply not in that index: a lookup with a null
-                key is empty, never an error, and unique indexes ignore nulls. Finding "uncategorised"
-                rows is therefore a scan (or a residual filter on another index).
+                A null is an index key like any other: a lookup with a null key returns the rows
+                whose value is null, never an error, and unique indexes still allow any number of
+                them. Only a bounded range excludes them, since null lies inside no interval.
             </p>
         </Panel>
         <Panel Title="Empty results" IconName="query">
@@ -562,10 +562,11 @@
         [BlazeDbIndex]
         public string? Category { get; set; }
 
-        table.Lookup(TodoEntry.Indexes.Category, null);   // always empty: nulls are not indexed
+        // The uncategorised rows, in one probe:
+        var uncategorised = table.Lookup(TodoEntry.Indexes.Category, null);
+        var howMany = table.CountBy(TodoEntry.Indexes.Category, null);
 
-        // Rows with a null category are a scan:
-        var uncategorised = table.Scan().Where(static r => r.Category is null);
+        // A unique index allows any number of nulls; a bounded Range excludes them.
         """;
 
     private const string EmptySnippet = """

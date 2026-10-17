@@ -208,7 +208,7 @@ public class IndexSelectionTests
     }
 
     [Fact]
-    public void A_Null_Valued_Equality_Does_Not_Use_An_Index()
+    public void A_Null_Valued_Equality_Uses_The_Index_When_Its_Key_Can_Be_Null()
     {
         var (test, context) = Open();
         using var owned = test;
@@ -216,12 +216,23 @@ public class IndexSelectionTests
 
         test.People.Insert(new Person { Id = 1, Name = "a", City = "X", Age = 1, Email = null });
         test.People.Insert(new Person { Id = 2, Name = "b", City = "X", Age = 2, Email = "b@x.com" });
+        test.Tags.Insert(new Tag { Slug = "t", Kind = TagKind.Topic, Weight = 1 });
 
-        // Nulls are not indexed, so a null-valued lookup has to fall back to a scan or it would
-        // silently return nothing.
+        // The engine records a null like any other indexed value, so "Email == null" is one lookup.
         var plan = PlanFor(test, context, context.People.Where(p => p.Email == null));
-        Assert.Null(plan.IndexName);
-        Assert.Single(context.People.Where(p => p.Email == null).ToList());
+        Assert.Equal("Email", plan.IndexName);
+        Assert.Equal([1], context.People.Where(p => p.Email == null).Select(p => p.Id).ToList());
+
+        // A compound index whose member can be null answers the tuple with the null in it.
+        var compound = PlanFor(test, context, context.People.Where(p => p.City == "X" && p.Age == 1));
+        Assert.Equal("CityAge", compound.IndexName);
+
+        // An index over a value type that cannot be null has no such entry to look up; the
+        // comparison stays a filter, which correctly matches nothing.
+        byte? none = null;
+        var impossible = PlanFor(test, context, context.Tags.Where(t => t.Weight == none));
+        Assert.Null(impossible.IndexName);
+        Assert.Empty(context.Tags.Where(t => t.Weight == none).ToList());
     }
 
     [Fact]
@@ -459,11 +470,23 @@ public class IndexSelectionTests
         Assert.Equal("City", byCity.IndexName);
         Assert.Equal([2, 4, 6], context.People.Where(p => new[] { "London", "Rome" }.Contains(p.City)).Select(p => p.Id).Order().ToList());
 
-        // A null in the list must match rows whose value is null, which no index holds - so it scans.
+        // A null in the list matches the rows whose value is null, which the index records too.
         var emails = new[] { "p1@x.com", null };
         var withNull = PlanFor(test, context, context.People.Where(p => emails.Contains(p.Email)));
-        Assert.Null(withNull.IndexName);
+        Assert.Equal("Email", withNull.IndexName);
         Assert.Equal([1, 3], context.People.Where(p => emails.Contains(p.Email)).Select(p => p.Id).Order().ToList());
+
+        // Against a key or a non-nullable index a null can match nothing, so it is dropped from the
+        // batch rather than looked up.
+        var idsWithNull = new int?[] { 2, null };
+        var keysWithNull = PlanFor(test, context, context.People.Where(p => idsWithNull.Contains(p.Id)));
+        Assert.True(keysWithNull.UsesPrimaryKey);
+        Assert.Equal([2], context.People.Where(p => idsWithNull.Contains(p.Id)).Select(p => p.Id).ToList());
+
+        // A set keyed ordinally asks the same question as the index, so it is not "custom".
+        var ordinal = new HashSet<string>(StringComparer.Ordinal) { "London" };
+        var ordinalPlan = PlanFor(test, context, context.People.Where(p => ordinal.Contains(p.City)));
+        Assert.Equal("City", ordinalPlan.IndexName);
 
         // A set with its own comparer may match values the (ordinal) index would not, so it scans.
         var caseless = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "london" };
